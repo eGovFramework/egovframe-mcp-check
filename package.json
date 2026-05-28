@@ -1,0 +1,33 @@
+{
+  "name": "egovframe-mcp-check",
+  "version": "1.0.0",
+  "description": "MCP server exposing eGovFrame architecture compliance checks.",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "egovframe-mcp-check": "./build/index.js"
+  },
+  "files": [
+    "build"
+  ],
+  "keywords": [
+    "egovframe",
+    "mcp",
+    "compliance",
+    "architecture"
+  ],
+  "scripts": {
+    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+    "prepare": "npm run build",
+    "watch": "tsc --watch",
+    "inspector": "npx @modelcontextprotocol/inspector build/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "0.6.0",
+    "@vscode/ripgrep": "^1.15.14"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "typescript": "^5.3.3"
+  }
+}
