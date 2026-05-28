@@ -6,80 +6,52 @@
  * Exposes a single tool: egov_check_compliance
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 import { checkArchitecture } from "./tools/checkArchitecture.js";
 
-const server = new Server(
+const server = new McpServer({
+  name: "egovframe-mcp-check",
+  version: "1.0.0",
+});
+
+server.registerTool(
+  "egov_check_compliance",
   {
-    name: "egovframe-mcp-check",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {
-      tools: {},
+    title: "eGovFrame Compliance Check",
+    description:
+      "Check eGovFrame project architecture compliance (Controller, Service, DAO, Mapper layers).",
+    inputSchema: {
+      projectPath: z
+        .string()
+        .min(1)
+        .describe("Path to eGovFrame project directory to check"),
+      exportResults: z
+        .boolean()
+        .optional()
+        .describe("Export detailed results to CSV files (default: false)"),
     },
-  }
+  },
+  async ({ projectPath, exportResults }) => {
+    try {
+      const result = await checkArchitecture({
+        projectPath,
+        exportResults: exportResults ?? false,
+      });
+      return {
+        content: [{ type: "text", text: result }],
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[egovframe-mcp-check] egov_check_compliance failed:`, error);
+      return {
+        content: [{ type: "text", text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
+  },
 );
-
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
-      {
-        name: "egov_check_compliance",
-        description:
-          "Check eGovFrame project architecture compliance (Controller, Service, DAO, Mapper layers)",
-        inputSchema: {
-          type: "object",
-          properties: {
-            projectPath: {
-              type: "string",
-              description: "Path to eGovFrame project directory to check",
-            },
-            exportResults: {
-              type: "boolean",
-              description: "Export detailed results to CSV files (default: false)",
-              default: false,
-            },
-          },
-          required: ["projectPath"],
-        },
-      },
-    ],
-  };
-});
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-
-  try {
-    if (name !== "egov_check_compliance") {
-      throw new Error(`Unknown tool: ${name}`);
-    }
-
-    const { projectPath, exportResults } = args as {
-      projectPath?: string;
-      exportResults?: boolean;
-    };
-    if (!projectPath) {
-      throw new Error("projectPath is required");
-    }
-    const result = await checkArchitecture({
-      projectPath,
-      exportResults: exportResults || false,
-    });
-    return {
-      content: [{ type: "text", text: result }],
-    };
-  } catch (error) {
-    console.error(`Error executing tool '${name}':`, error);
-    throw error;
-  }
-});
 
 async function main() {
   try {
