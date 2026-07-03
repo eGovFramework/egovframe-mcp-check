@@ -1,7 +1,7 @@
 /**
  * egov_check_compliance 도구 동작 테스트 — 임시 프로젝트 fixture 기반.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -91,5 +91,49 @@ describe("checkArchitecture — 레이어 판정", () => {
 	it("점검 대상 파일이 없으면 0건으로 정상 완료한다", async () => {
 		const out = await checkArchitecture({ projectPath: tmpDir });
 		expect(out).toMatch(/Total Files: 0/);
+	});
+});
+
+describe("checkArchitecture — 정보성 로그 gating (EGOV_CHECK_DEBUG)", () => {
+	const prevDebug = process.env.EGOV_CHECK_DEBUG;
+
+	afterEach(() => {
+		if (prevDebug === undefined) {
+			delete process.env.EGOV_CHECK_DEBUG;
+		} else {
+			process.env.EGOV_CHECK_DEBUG = prevDebug;
+		}
+		vi.restoreAllMocks();
+	});
+
+	async function writeNonCompliantController() {
+		await writeJava(
+			"src/main/java/com/example/web/BarController.java",
+			["package com.example.web;", "", "public class BarController {", "\tpublic String list() {", "\t\treturn \"bar/list\";", "\t}", "}", ""].join("\n"),
+		);
+	}
+
+	it("EGOV_CHECK_DEBUG 미설정 시 파일별 ✅/⏭️/❌ 로그를 출력하지 않는다", async () => {
+		delete process.env.EGOV_CHECK_DEBUG;
+		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		await writeNonCompliantController();
+		await checkArchitecture({ projectPath: tmpDir });
+
+		const infoLines = spy.mock.calls.map((args) => String(args[0])).filter((m) => /[✅❌🔍🚀]|⏭️/u.test(m));
+		expect(infoLines).toEqual([]);
+	});
+
+	it("EGOV_CHECK_DEBUG=1 이면 파일별 정보성 로그가 출력된다", async () => {
+		process.env.EGOV_CHECK_DEBUG = "1";
+		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		await writeNonCompliantController();
+		await checkArchitecture({ projectPath: tmpDir });
+
+		const infoLines = spy.mock.calls.map((args) => String(args[0])).filter((m) => /[✅❌🔍🚀]|⏭️/u.test(m));
+		expect(infoLines.length).toBeGreaterThan(0);
+		// 절대 경로 대신 basename 만 로그되는지 확인
+		expect(infoLines.join("\n")).not.toContain(tmpDir);
 	});
 });

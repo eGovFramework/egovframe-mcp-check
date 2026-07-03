@@ -29,6 +29,25 @@ export interface ArchCheckResults {
 }
 
 /**
+ * EGOV_CHECK_DEBUG 환경 변수가 켜져 있는지 확인 (호출 시점 평가 — 테스트에서 토글 가능)
+ * "0"/"false" 를 제외한 비어있지 않은 값이면 켜진 것으로 본다.
+ */
+function isDebugEnabled(): boolean {
+	const value = process.env.EGOV_CHECK_DEBUG
+	return value !== undefined && value !== "" && value !== "0" && value.toLowerCase() !== "false"
+}
+
+/**
+ * 파일별 진행 상황 등 정보성 로그. EGOV_CHECK_DEBUG 가 켜진 경우에만 stderr 로 출력한다.
+ * 실제 오류/경고는 이 함수를 거치지 않고 console.error 로 항상 출력한다.
+ */
+function debugLog(message: string): void {
+	if (isDebugEnabled()) {
+		console.error(message)
+	}
+}
+
+/**
  * vscode-ripgrep 패키지가 사용 가능한지 확인
  */
 function isRipgrepAvailable(): boolean {
@@ -130,7 +149,7 @@ function findFilesWithFs(dirPath: string, fileRegex: RegExp, visited: Set<string
 			}
 		}
 	} catch (error) {
-		console.error(`Error reading directory ${dirPath}:`, error)
+		console.error(`Error reading directory ${path.basename(dirPath)}:`, error)
 	}
 
 	return results
@@ -200,7 +219,7 @@ function checkControllerMethods(filePath: string): ControllerCheckResult {
 		result.hasControllerAnnotation = hasControllerAnnotation || hasRestControllerAnnotation
 
 		if (!result.hasControllerAnnotation) {
-			console.error(
+			debugLog(
 				`❌ ${path.basename(filePath)} is missing @Controller or @RestController annotation (or it's commented out)`,
 			)
 		}
@@ -208,7 +227,7 @@ function checkControllerMethods(filePath: string): ControllerCheckResult {
 		// 2. 클래스 레벨 @RequestMapping 확인 (있으면 메서드 레벨 mapping은 선택 사항)
 		const hasClassLevelRequestMapping = checkClassLevelRequestMapping(lines)
 		if (hasClassLevelRequestMapping) {
-			console.error(`✅ ${path.basename(filePath)} has class-level @RequestMapping`)
+			debugLog(`✅ ${path.basename(filePath)} has class-level @RequestMapping`)
 		}
 
 		// 3. 메서드별 mapping annotation 검사
@@ -289,7 +308,7 @@ function checkControllerMethods(filePath: string): ControllerCheckResult {
 					methodsWithMapping++
 				} else if (!hasClassLevelRequestMapping) {
 					// 클래스 레벨 @RequestMapping이 없는 경우에만 메서드 레벨 매핑 필수
-					console.error(`❌ Method '${methodName}' in ${path.basename(filePath)} is missing mapping annotation`)
+					debugLog(`❌ Method '${methodName}' in ${path.basename(filePath)} is missing mapping annotation`)
 				}
 			}
 		}
@@ -300,7 +319,7 @@ function checkControllerMethods(filePath: string): ControllerCheckResult {
 		// 3. 또는 최소 1개 이상의 메서드에 mapping이 있으면 OK (일부 메서드는 내부용일 수 있음)
 		if (methodCount === 0) {
 			// Controller인데 public 메서드가 없으면 mapping 검사는 불필요하지만 경고
-			console.error(`⚠️ No public methods found in ${path.basename(filePath)}`)
+			debugLog(`⚠️ No public methods found in ${path.basename(filePath)}`)
 			result.hasAllMappings = hasClassLevelRequestMapping // 클래스 레벨 매핑이 있으면 OK
 		} else if (hasClassLevelRequestMapping) {
 			// 클래스 레벨 @RequestMapping이 있으면 OK
@@ -308,17 +327,17 @@ function checkControllerMethods(filePath: string): ControllerCheckResult {
 		} else if (methodsWithMapping > 0) {
 			// 최소 1개 이상의 메서드에 mapping이 있으면 OK
 			result.hasAllMappings = true
-			console.error(`✅ ${methodsWithMapping}/${methodCount} methods in ${path.basename(filePath)} have mapping annotations`)
+			debugLog(`✅ ${methodsWithMapping}/${methodCount} methods in ${path.basename(filePath)} have mapping annotations`)
 		} else {
 			result.hasAllMappings = false
 		}
 
-		console.error(
+		debugLog(
 			`✅ Controller checks for ${path.basename(filePath)}: @Controller=${result.hasControllerAnnotation}, Mapping=${result.hasAllMappings}`,
 		)
 		return result
 	} catch (error) {
-		console.error(`Error checking controller methods in ${filePath}:`, error)
+		console.error(`Error checking controller methods in ${path.basename(filePath)}:`, error)
 		return result
 	}
 }
@@ -431,7 +450,7 @@ function checkParentClassExtends(
 		const parentFilePath = findJavaFile(projectPath, parentClassFile)
 
 		if (!parentFilePath) {
-			console.error(`⚠️ Parent class file '${parentClassFile}' not found in project`)
+			debugLog(`⚠️ Parent class file '${parentClassFile}' not found in project`)
 			return false
 		}
 
@@ -444,7 +463,7 @@ function checkParentClassExtends(
 		const hasExtends = findRegexPatternIgnoringComments(lines, extendsPattern)
 
 		if (hasExtends) {
-			console.error(`✅ Parent class '${parentClassName}' extends '${targetClassName}': true`)
+			debugLog(`✅ Parent class '${parentClassName}' extends '${targetClassName}': true`)
 			return true
 		}
 
@@ -454,12 +473,12 @@ function checkParentClassExtends(
 			const grandParentClassName = grandParentMatch[1]
 			// 프레임워크 기본 클래스가 아니라면 계속 추적
 			if (grandParentClassName !== targetClassName && grandParentClassName !== "Object") {
-				console.error(`🔍 Tracing inheritance: ${parentClassName} → ${grandParentClassName} → ... → ${targetClassName}?`)
+				debugLog(`🔍 Tracing inheritance: ${parentClassName} → ${grandParentClassName} → ... → ${targetClassName}?`)
 				return checkParentClassExtends(projectPath, grandParentClassName, targetClassName, maxDepth - 1)
 			}
 		}
 
-		console.error(`✅ Parent class '${parentClassName}' extends '${targetClassName}': false`)
+		debugLog(`✅ Parent class '${parentClassName}' extends '${targetClassName}': false`)
 		return false
 	} catch (error) {
 		console.error(`Error checking parent class ${parentClassName}:`, error)
@@ -487,17 +506,17 @@ function checkServiceFile(filePath: string): boolean[] {
 		if (hasExtendsAbstract) {
 			// 직접 EgovAbstractServiceImpl을 상속한 경우
 			extendsCheck = true
-			console.error(`✅ ${path.basename(filePath)} directly extends EgovAbstractServiceImpl`)
+			debugLog(`✅ ${path.basename(filePath)} directly extends EgovAbstractServiceImpl`)
 		} else if (hasExtendsCommon) {
 			// EgovCommonServiceImpl을 상속한 경우, 해당 클래스가 EgovAbstractServiceImpl을 상속하는지 체크
 			const projectPath = findSourceRoot(filePath)
 			const parentExtendsAbstract = checkParentClassExtends(projectPath, "EgovCommonServiceImpl", "EgovAbstractServiceImpl")
 			extendsCheck = parentExtendsAbstract
-			console.error(
+			debugLog(
 				`✅ ${path.basename(filePath)} extends EgovCommonServiceImpl, which extends EgovAbstractServiceImpl: ${parentExtendsAbstract}`,
 			)
 		} else {
-			console.error(`❌ ${path.basename(filePath)} does not extend EgovAbstractServiceImpl or EgovCommonServiceImpl`)
+			debugLog(`❌ ${path.basename(filePath)} does not extend EgovAbstractServiceImpl or EgovCommonServiceImpl`)
 		}
 
 		// 2. @Service annotation (주석 제외)
@@ -515,13 +534,13 @@ function checkServiceFile(filePath: string): boolean[] {
 			hasImplements = /implements.*Service/.test(nonCommentLines)
 		}
 
-		console.error(
+		debugLog(
 			`✅ Service checks for ${path.basename(filePath)}: extends=${extendsCheck}, @Service=${hasServiceAnnotation}, implements=${hasImplements}`,
 		)
 
 		return [extendsCheck, hasServiceAnnotation, hasImplements]
 	} catch (error) {
-		console.error(`Error checking service file ${filePath}:`, error)
+		console.error(`Error checking service file ${path.basename(filePath)}:`, error)
 		return [false, false, false]
 	}
 }
@@ -556,12 +575,12 @@ function checkDAOFile(filePath: string): boolean[] {
 					// 부모 클래스가 EgovAbstractDAO를 상속하는지 확인
 					if (checkParentClassExtends(projectPath, parentClassName, "EgovAbstractDAO")) {
 						hasAbstractDAO = true
-						console.error(`✅ ${path.basename(filePath)} indirectly extends EgovAbstractDAO via ${parentClassName}`)
+						debugLog(`✅ ${path.basename(filePath)} indirectly extends EgovAbstractDAO via ${parentClassName}`)
 					}
 					// 부모 클래스가 EgovAbstractMapper를 상속하는지 확인
 					if (!hasAbstractDAO && checkParentClassExtends(projectPath, parentClassName, "EgovAbstractMapper")) {
 						hasAbstractMapper = true
-						console.error(`✅ ${path.basename(filePath)} indirectly extends EgovAbstractMapper via ${parentClassName}`)
+						debugLog(`✅ ${path.basename(filePath)} indirectly extends EgovAbstractMapper via ${parentClassName}`)
 					}
 				}
 			}
@@ -573,11 +592,11 @@ function checkDAOFile(filePath: string): boolean[] {
 		// Check2: @Repository + EgovAbstractMapper
 		const check2 = hasRepository && hasAbstractMapper
 
-		console.error(`✅ DAO checks for ${path.basename(filePath)}: @Repository+DAO=${check1}, @Repository+Mapper=${check2}`)
+		debugLog(`✅ DAO checks for ${path.basename(filePath)}: @Repository+DAO=${check1}, @Repository+Mapper=${check2}`)
 
 		return [check1, check2, false]
 	} catch (error) {
-		console.error(`Error checking DAO file ${filePath}:`, error)
+		console.error(`Error checking DAO file ${path.basename(filePath)}:`, error)
 		return [false, false, false]
 	}
 }
@@ -598,13 +617,13 @@ function checkMapperFile(filePath: string): boolean[] {
 
 		const isValid = hasMapperAnnotation || hasEgovMapperAnnotation
 
-		console.error(
+		debugLog(
 			`✅ Mapper check for ${path.basename(filePath)}: @Mapper=${hasMapperAnnotation}, @EgovMapper=${hasEgovMapperAnnotation}`,
 		)
 
 		return [isValid, false, false]
 	} catch (error) {
-		console.error(`Error checking mapper file ${filePath}:`, error)
+		console.error(`Error checking mapper file ${path.basename(filePath)}:`, error)
 		return [false, false, false]
 	}
 }
@@ -651,7 +670,7 @@ async function checkLayer(
 
 			// abstract class는 점검 대상에서 제외 (기반 클래스이므로 어노테이션/매핑이 없는 것이 정상)
 			if (isAbstractClass(filePath)) {
-				console.error(`⏭️ Skipping abstract class: ${fileName}`)
+				debugLog(`⏭️ Skipping abstract class: ${fileName}`)
 				continue
 			}
 
@@ -733,8 +752,9 @@ export async function checkEgovArchitecture(
 	const useRipgrep = isRipgrepAvailable()
 
 	if (useRipgrep) {
-		console.error("🚀 Using @vscode/ripgrep for fast architecture checking")
+		debugLog("🚀 Using @vscode/ripgrep for fast architecture checking")
 	} else {
+		// 성능 저하 모드로의 전환은 실제 경고이므로 항상 출력
 		console.error("⚠️ @vscode/ripgrep not available, falling back to fs-based search")
 	}
 
@@ -873,9 +893,9 @@ function saveReport(
 		}
 
 		fs.writeFileSync(outputPath, csvContent, "utf8")
-		console.error(`Report saved to: ${outputPath}`)
+		debugLog(`Report saved to: ${path.basename(outputPath)}`)
 	} catch (error) {
-		console.error(`Error saving report to ${outputPath}:`, error)
+		console.error(`Error saving report to ${path.basename(outputPath)}:`, error)
 		throw error
 	}
 }
@@ -895,7 +915,7 @@ export async function exportArchResults(results: ArchCheckResults, projectPath: 
 			}
 		}
 
-		console.error("All reports exported successfully")
+		debugLog("All reports exported successfully")
 	} catch (error) {
 		console.error("Error exporting results:", error)
 		throw error
