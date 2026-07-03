@@ -2,6 +2,7 @@
  * Tool for checking eGovFrame architecture compliance
  */
 
+import { stat } from "node:fs/promises";
 import { checkEgovArchitecture, exportArchResults } from "../utils/archChecker.js";
 
 export interface CheckArchitectureOptions {
@@ -17,6 +18,17 @@ export async function checkArchitecture(options: CheckArchitectureOptions): Prom
 
   if (!projectPath || !projectPath.trim()) {
     throw new Error("projectPath is required");
+  }
+
+  // 존재하지 않는 경로가 깊은 호출부에서 모호하게 실패하지 않도록 선제 검증
+  let pathStat;
+  try {
+    pathStat = await stat(projectPath);
+  } catch {
+    throw new Error(`projectPath does not exist or is not accessible: ${projectPath}`);
+  }
+  if (!pathStat.isDirectory()) {
+    throw new Error(`projectPath must be a directory: ${projectPath}`);
   }
 
   // Progress messages

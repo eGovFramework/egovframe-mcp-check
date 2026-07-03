@@ -42,9 +42,13 @@ function isRipgrepAvailable(): boolean {
 
 /**
  * vscode-ripgrep을 사용하여 패턴과 매칭되는 파일 목록을 가져옴
+ *
+ * ripgrep 종료 코드: 0 = 매칭 있음, 1 = 매칭 없음(정상), 2+ = 실행 오류.
+ * 매칭 없음은 빈 배열로 처리하고, 실제 오류(권한 등)는 reject 하여
+ * "0건 통과" 로 잘못 보고되는 것을 막는다.
  */
 function findFilesWithRipgrep(projectPath: string, filePattern: string): Promise<string[]> {
-	return new Promise((resolve) => {
+	return new Promise((resolve, reject) => {
 		if (!rgPath || typeof rgPath !== "string") {
 			console.error("ripgrep path not available")
 			resolve([])
@@ -52,41 +56,63 @@ function findFilesWithRipgrep(projectPath: string, filePattern: string): Promise
 		}
 
 		const args = ["--files", "--glob", filePattern, projectPath]
-		const rg = spawn(rgPath, args, { stdio: ["ignore", "pipe", "ignore"] })
+		const rg = spawn(rgPath, args, { stdio: ["ignore", "pipe", "pipe"] })
 
-		let output = ""
+		const stdoutChunks: string[] = []
+		const stderrChunks: string[] = []
 
 		rg.stdout?.on("data", (data) => {
-			output += data.toString()
+			stdoutChunks.push(data.toString())
+		})
+
+		rg.stderr?.on("data", (data) => {
+			stderrChunks.push(data.toString())
 		})
 
 		rg.on("close", (code) => {
-			if (code === 0) {
-				const files = output
+			if (code === 0 || code === 1) {
+				const files = stdoutChunks
+					.join("")
 					.trim()
 					.split("\n")
 					.filter((f) => f.length > 0)
 				resolve(files)
 			} else {
-				console.error(`No files found matching pattern: ${filePattern}`)
-				resolve([])
+				const detail = stderrChunks.join("").trim().split("\n")[0] || `exit code ${code}`
+				reject(new Error(`File search failed for pattern '${filePattern}': ${detail}`))
 			}
 		})
 
 		rg.on("error", (error) => {
-			console.error(`Error running ripgrep: ${error.message}`)
-			resolve([])
+			reject(new Error(`Failed to run file search: ${error.message}`))
 		})
 	})
 }
 
 /**
- * fallback: fs를 사용한 파일 찾기 (ripgrep이 없는 경우)
+ * '*Controller.java' 같은 단순 글롭을 정규식으로 변환 (fs fallback 용).
+ * '.' 이스케이프를 '*' 변환보다 먼저 수행해야 한다 — 순서가 반대면
+ * 방금 만든 '.*' 의 '.' 까지 이스케이프되어 아무 파일도 매칭되지 않는다.
  */
-function findFilesWithFs(dirPath: string, fileRegex: string): string[] {
+export function globToRegex(glob: string): RegExp {
+	const escaped = glob.replace(/\./g, "\\.").replace(/\*/g, ".*")
+	return new RegExp(`${escaped}$`)
+}
+
+/**
+ * fallback: fs를 사용한 파일 찾기 (ripgrep이 없는 경우)
+ * visited(realpath 집합) 로 심볼릭 링크 순환을 방어한다.
+ */
+function findFilesWithFs(dirPath: string, fileRegex: RegExp, visited: Set<string> = new Set()): string[] {
 	const results: string[] = []
 
 	try {
+		const real = fs.realpathSync(dirPath)
+		if (visited.has(real)) {
+			return results
+		}
+		visited.add(real)
+
 		const files = fs.readdirSync(dirPath)
 
 		for (const file of files) {
@@ -94,12 +120,12 @@ function findFilesWithFs(dirPath: string, fileRegex: string): string[] {
 			const stat = fs.statSync(fullPath)
 
 			if (stat.isFile()) {
-				if (new RegExp(fileRegex).test(fullPath)) {
+				if (fileRegex.test(fullPath)) {
 					results.push(fullPath)
 				}
 			} else if (stat.isDirectory()) {
 				// 재귀적으로 하위 디렉토리 탐색
-				const subResults = findFilesWithFs(fullPath, fileRegex)
+				const subResults = findFilesWithFs(fullPath, fileRegex, visited)
 				results.push(...subResults)
 			}
 		}
@@ -113,7 +139,7 @@ function findFilesWithFs(dirPath: string, fileRegex: string): string[] {
 /**
  * 주석이 아닌 라인에서 패턴 찾기
  */
-function findPatternIgnoringComments(lines: string[], pattern: string): boolean {
+export function findPatternIgnoringComments(lines: string[], pattern: string): boolean {
 	for (const line of lines) {
 		const trimmed = line.trim()
 		// 주석이 아닌 라인에서만 패턴 찾기
@@ -129,7 +155,7 @@ function findPatternIgnoringComments(lines: string[], pattern: string): boolean 
 /**
  * 주석이 아닌 라인에서 정규식 패턴 찾기
  */
-function findRegexPatternIgnoringComments(lines: string[], pattern: RegExp): boolean {
+export function findRegexPatternIgnoringComments(lines: string[], pattern: RegExp): boolean {
 	for (const line of lines) {
 		const trimmed = line.trim()
 		// 주석이 아닌 라인에서만 패턴 찾기
@@ -355,16 +381,23 @@ function findSourceRoot(filePath: string): string {
 
 /**
  * 프로젝트 내에서 특정 이름의 Java 파일을 재귀적으로 찾기
+ * visited(realpath 집합) 로 심볼릭 링크 순환을 방어한다.
  */
-function findJavaFile(searchPath: string, fileName: string): string | null {
+function findJavaFile(searchPath: string, fileName: string, visited: Set<string> = new Set()): string | null {
 	try {
+		const real = fs.realpathSync(searchPath)
+		if (visited.has(real)) {
+			return null
+		}
+		visited.add(real)
+
 		const files = fs.readdirSync(searchPath)
 		for (const file of files) {
 			const fullPath = path.join(searchPath, file)
 			const stat = fs.statSync(fullPath)
 
 			if (stat.isDirectory()) {
-				const found = findJavaFile(fullPath, fileName)
+				const found = findJavaFile(fullPath, fileName, visited)
 				if (found) {
 					return found
 				}
@@ -608,8 +641,7 @@ async function checkLayer(
 			fileList = await findFilesWithRipgrep(projectPath, filePattern)
 		} else {
 			// fallback to fs-based search
-			const regexPattern = filePattern.replace(/\*/g, ".*").replace(/\./g, "\\.")
-			fileList = findFilesWithFs(projectPath, regexPattern)
+			fileList = findFilesWithFs(projectPath, globToRegex(filePattern))
 		}
 
 		// 2. 각 파일에 대해 패턴 검사
@@ -682,7 +714,9 @@ async function checkLayer(
 			})
 		}
 	} catch (error) {
-		console.error(`Error checking ${layerType} layer:`, error)
+		// 조용히 빈 결과로 삼키면 "0건 통과" 로 오인되므로 레이어 컨텍스트를 붙여 전파한다.
+		const message = error instanceof Error ? error.message : String(error)
+		throw new Error(`${layerType} layer check failed: ${message}`)
 	}
 
 	return results
@@ -779,7 +813,7 @@ export async function checkEgovArchitecture(
 /**
  * 레이어별 CSV 컬럼명 및 사용 여부 반환
  */
-function getLayerCheckInfo(layerType: "Controller" | "Service" | "DAO" | "Mapper") {
+export function getLayerCheckInfo(layerType: "Controller" | "Service" | "DAO" | "Mapper") {
 	switch (layerType) {
 		case "Controller":
 			return {
@@ -807,7 +841,7 @@ function getLayerCheckInfo(layerType: "Controller" | "Service" | "DAO" | "Mapper
 /**
  * Check 값을 CSV용으로 포맷팅 (사용하지 않는 체크는 '-'로 표시)
  */
-function formatCheckValue(value: boolean, isUsed: boolean): string {
+export function formatCheckValue(value: boolean, isUsed: boolean): string {
 	if (!isUsed) {
 		return "-"
 	}
