@@ -10,6 +10,7 @@
   "files": [
     "build"
   ],
+  "bundleDependencies": true,
   "keywords": [
     "egovframe",
     "mcp",
@@ -19,6 +20,7 @@
   "scripts": {
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
     "prepare": "npm run build",
+    "pack:platforms": "bash scripts/pack-platforms.sh",
     "watch": "tsc --watch",
     "test": "npm run build && vitest run",
     "test:watch": "vitest",
