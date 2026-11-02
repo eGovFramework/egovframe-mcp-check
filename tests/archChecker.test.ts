@@ -14,6 +14,12 @@ import {
 import type { ProjectCheckSummary } from "../src/shared/archCheck.js"
 import { rgPath as packagedRgPath } from "@vscode/ripgrep"
 
+// Service 상속 추적이 디렉터리를 다시 훑지 않는지 세기 위해 readdirSync만 호출 기록이 남는 래퍼로 바꾼다 (동작은 원본 그대로)
+vi.mock("fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("fs")>()
+	return { ...actual, default: actual, readdirSync: vi.fn(actual.readdirSync) }
+})
+
 /** 저장소 node_modules에 npm이 설치한 @vscode/ripgrep 플랫폼 패키지의 rg가 있으면 ripgrep 경로도 검증한다 */
 const bundledRg = typeof packagedRgPath === "string" && fs.existsSync(packagedRgPath) ? packagedRgPath : null
 
@@ -165,6 +171,20 @@ describe.skipIf(!bundledRg)("파일 수집: ripgrep 경로", () => {
 		})
 		const results = await checkEgovArchitecture(root, undefined, { rgPath: bundledRg })
 		expect(fileNames(results, "Controller")).toEqual(["RealController.java"])
+	})
+
+	it("프로젝트 디렉터리 이름이 -로 시작해도 rg 옵션으로 읽히지 않고 프로젝트 안의 파일만 모은다", async () => {
+		const controller = `@Controller\n@RequestMapping("/a")\npublic class AController {}\n`
+		// -x(--line-regexp)·-L(--follow)처럼 rg 옵션과 같은 이름: 옵션으로 읽히면 cwd(부모) 전체를 훑거나 심볼릭 링크를 따라간다
+		for (const dirName of ["-x", "-L"]) {
+			const root = makeNestedProject(dirName, { [`${SRC}/web/AController.java`]: controller })
+			const outside = path.join(path.dirname(root), "outside", "OutsideController.java")
+			fs.mkdirSync(path.dirname(outside), { recursive: true })
+			fs.writeFileSync(outside, controller)
+			const expected = [path.join(root, SRC, "web", "AController.java")]
+			expect(await collectProjectFiles(root, ["*.java"], bundledRg)).toEqual(expected)
+			expect(await collectProjectFiles(root, ["*.java"])).toEqual(expected)
+		}
 	})
 })
 
@@ -377,6 +397,58 @@ describe("판정 규칙 (fs 경로)", () => {
 		})
 	})
 
+	it("Service check1: 부모 클래스는 색인으로 찾으므로 부모가 없는 ServiceImpl이 많아도 디렉터리를 다시 훑지 않는다", async () => {
+		const serviceCount = 300
+		const files: Record<string, string> = {}
+		for (let i = 0; i < serviceCount; i++) {
+			files[`${SRC}/service/impl/Svc${i}ServiceImpl.java`] =
+				`@Service\npublic class Svc${i}ServiceImpl extends MissingBase implements Svc${i}Service {}\n`
+		}
+		const root = makeProject(files)
+		const readdir = vi.mocked(fs.readdirSync)
+		readdir.mockClear()
+		const results = await checkEgovArchitecture(root)
+		expect(results.Service?.totalFiles).toBe(serviceCount)
+		expect(results.Service?.passedFiles).toBe(0)
+		// 종전에는 ServiceImpl마다 소스 루트를 재귀 스캔해 호출 수가 파일 수 × 디렉터리 수로 늘었다
+		expect(readdir.mock.calls.length).toBeLessThan(serviceCount)
+	})
+
+	it("Service check1: 부모 클래스 탐색은 projectPath 아래로 한정하고 심볼릭 링크는 따라가지 않는다", async () => {
+		const base = `public abstract class OutsideBase extends EgovAbstractServiceImpl {}\n`
+		// src/main이 없는 프로젝트: 종전 findSourceRoot의 최후 fallback은 파일의 세 단계 위(프로젝트 밖)를 소스 루트로 삼았다
+		const root = makeProject({
+			"svc/impl/AServiceImpl.java": `@Service\npublic class AServiceImpl extends OutsideBase implements AService {}\n`,
+			[`${SRC}/service/impl/BServiceImpl.java`]: `@Service\npublic class BServiceImpl extends LinkedBase implements BService {}\n`,
+		})
+		const outside = path.join(path.dirname(root), `outside-${path.basename(root)}`)
+		tempDirs.push(outside)
+		fs.mkdirSync(path.join(outside, "linked"), { recursive: true })
+		fs.writeFileSync(path.join(outside, "OutsideBase.java"), base)
+		fs.writeFileSync(
+			path.join(outside, "linked", "LinkedBase.java"),
+			`public abstract class LinkedBase extends EgovAbstractServiceImpl {}\n`,
+		)
+		fs.symlinkSync(path.join(outside, "linked"), path.join(root, SRC, "cmmn"), "dir")
+
+		const results = await checkEgovArchitecture(root)
+		expect(resultOf(results, "Service", "AServiceImpl.java")).toMatchObject({ check1: false, result: "NotFound" })
+		expect(resultOf(results, "Service", "BServiceImpl.java")).toMatchObject({ check1: false, result: "NotFound" })
+	})
+
+	it("Service check1: 부모 클래스가 다른 모듈에 있어도 프로젝트 색인에서 찾아 상속 체인을 추적한다", async () => {
+		const root = makeProject({
+			"common/src/main/java/egov/cmmn/CommonBase.java": `package egov.cmmn;\npublic abstract class CommonBase extends EgovAbstractServiceImpl {}\n`,
+			"web/src/main/java/egov/web/CServiceImpl.java": `package egov.web;\nimport egov.cmmn.CommonBase;\n@Service\npublic class CServiceImpl extends CommonBase implements CService {}\n`,
+			// 동명 부모가 둘이면 자식의 package·import로 고른다: 이 import는 EgovAbstractServiceImpl 계열이 아닌 쪽을 가리킨다
+			"other/src/main/java/egov/other/CommonBase.java": `package egov.other;\npublic abstract class CommonBase {}\n`,
+			"web/src/main/java/egov/web/DServiceImpl.java": `package egov.web;\nimport egov.other.CommonBase;\n@Service\npublic class DServiceImpl extends CommonBase implements DService {}\n`,
+		})
+		const results = await checkEgovArchitecture(root)
+		expect(resultOf(results, "Service", "CServiceImpl.java")).toMatchObject({ check1: true, result: "OK" })
+		expect(resultOf(results, "Service", "DServiceImpl.java")).toMatchObject({ check1: false, result: "NotFound" })
+	})
+
 	it("Service check3: 클래스 선언부의 implements 목록에 Service로 끝나는 인터페이스가 있어야 한다", async () => {
 		const head = "@Service\npublic class"
 		const base = "extends EgovAbstractServiceImpl"
@@ -482,6 +554,41 @@ describe("판정 규칙 (fs 경로)", () => {
 			result: "NotFound",
 		})
 	})
+
+	it.skipIf(process.getuid?.() === 0)(
+		"오류 로그에는 파일 이름과 오류 요약만 남기고 절대 경로·스택은 남기지 않는다",
+		async () => {
+			const root = makeProject({
+				[`${SRC}/service/impl/LockedServiceImpl.java`]: `@Service\npublic class LockedServiceImpl extends EgovAbstractServiceImpl implements LockedService {}\n`,
+				[`${SRC}/service/impl/OpenServiceImpl.java`]: `@Service\npublic class OpenServiceImpl extends EgovAbstractServiceImpl implements OpenService {}\n`,
+			})
+			const locked = path.join(root, SRC, "service", "impl", "LockedServiceImpl.java")
+			fs.chmodSync(locked, 0o000)
+			const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+			errors.mockClear()
+			try {
+				const results = await checkEgovArchitecture(root)
+				expect(resultOf(results, "Service", "LockedServiceImpl.java")).toMatchObject({
+					check1: false,
+					result: "NotFound",
+				})
+				expect(resultOf(results, "Service", "OpenServiceImpl.java")).toMatchObject({ result: "OK" })
+				expect(errors.mock.calls.length).toBeGreaterThan(0)
+				const logged = errors.mock.calls.map((args) => args.map(String).join(" "))
+				expect(logged.some((line) => line.includes("LockedServiceImpl.java"))).toBe(true)
+				for (const args of errors.mock.calls) {
+					// Error 객체를 그대로 넘기면 Node 원문 메시지(절대 경로)와 스택이 함께 찍힌다
+					expect(args.every((arg) => typeof arg === "string")).toBe(true)
+				}
+				for (const line of logged) {
+					expect(line).not.toContain(root)
+					expect(line).not.toMatch(/\n\s+at /)
+				}
+			} finally {
+				fs.chmodSync(locked, 0o644)
+			}
+		},
+	)
 
 	it("파일이 없어도 세 레이어가 모두 채워진다", async () => {
 		const results = await checkEgovArchitecture(makeProject({}))
@@ -715,6 +822,74 @@ describe("CSV 내보내기", () => {
 		])
 		// 다른 레이어는 종전대로 PASS/FAIL만 쓴다
 		expect(readCsv(outDir, "Service")[1]).toBe("/p/service,UserServiceImpl.java,PASS,PASS,PASS,OK")
+	})
+
+	it("Controller·Service CSV도 모든 셀을 이스케이프하고 수식으로 읽힐 수 있는 셀 앞에는 '를 붙인다", async () => {
+		const outDir = makeProject({})
+		const service = (parentPath: string, fileName: string): ArchCheckResult => ({
+			filePath: `${parentPath}/${fileName}`,
+			fileName,
+			parentPath,
+			check1: true,
+			check2: true,
+			check3: true,
+			result: "OK",
+			type: "Service",
+		})
+		await exportArchResults(
+			{
+				Controller: {
+					totalFiles: 2,
+					passedFiles: 2,
+					failedFiles: 0,
+					results: [
+						{
+							...controller('Odd"Controller.java', {
+								check2: true,
+								mappedMethodCount: 1,
+								methodCount: 1,
+								hasClassLevelMapping: false,
+							}),
+							parentPath: "/p/odd,dir",
+						},
+						{
+							...controller("EqController.java", {
+								check2: true,
+								mappedMethodCount: 1,
+								methodCount: 1,
+								hasClassLevelMapping: false,
+							}),
+							parentPath: "=HYPERLINK(1)",
+						},
+					],
+				},
+				Service: {
+					totalFiles: 4,
+					passedFiles: 4,
+					failedFiles: 0,
+					results: [
+						service("-x/svc", "DashServiceImpl.java"),
+						service("+p/svc", "PlusServiceImpl.java"),
+						service("@h/svc", "AtServiceImpl.java"),
+						// 음수 표기(`-5`)는 수식이 아니므로 그대로 둔다 (`-` 하나는 DAO CSV 테스트의 Style 열이 확인한다)
+						service("-5", "MinusServiceImpl.java"),
+					],
+				},
+			},
+			outDir,
+		)
+		expect(readCsv(outDir, "Controller")).toEqual([
+			"Path,FileName,@Controller,Mapping Annotation,DAO X,Result",
+			'"/p/odd,dir","Odd""Controller.java",PASS,PASS,PASS,OK',
+			"'=HYPERLINK(1),EqController.java,PASS,PASS,PASS,OK",
+		])
+		expect(readCsv(outDir, "Service")).toEqual([
+			"Path,FileName,Extends EgovAbstractServiceImpl,@Service,Implements Service,Result",
+			"'-x/svc,DashServiceImpl.java,PASS,PASS,PASS,OK",
+			"'+p/svc,PlusServiceImpl.java,PASS,PASS,PASS,OK",
+			"'@h/svc,AtServiceImpl.java,PASS,PASS,PASS,OK",
+			"-5,MinusServiceImpl.java,PASS,PASS,PASS,OK",
+		])
 	})
 
 	it("DAO CSV는 Style/Base/Bean/Version 열에 상세 문자열을 쓰고 쉼표가 든 셀은 인용한다", async () => {

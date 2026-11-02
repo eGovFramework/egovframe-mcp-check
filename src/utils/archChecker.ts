@@ -19,9 +19,9 @@ import {
 	isDataAccessConfigPath,
 	scanDataAccessConfig,
 } from "./dataAccessConfigScan.js"
-import { checkDaoLayer, type DaoLayerOutcome } from "./daoCheck.js"
-import { buildJavaIndex } from "./javaIndex.js"
-import { createCachedReader } from "./javaSource.js"
+import { checkDaoLayer, type DaoLayerOutcome, type SourceContext } from "./daoCheck.js"
+import { buildJavaIndex, resolveTypeReference, type JavaIndex, type ReadFile } from "./javaIndex.js"
+import { collectImports, createCachedReader, readPackage, stripJavaComments } from "./javaSource.js"
 import { debugLog } from "./debugLog.js"
 
 // 결과 타입은 웹뷰·메시지 계약과 공유하므로 src/shared/archCheck.ts에 정의한다
@@ -76,6 +76,18 @@ function isRipgrepAvailable(rgPath: string | undefined): rgPath is string {
 	}
 }
 
+/**
+ * 로그용 오류 요약. Error 객체를 그대로 넘기면 Node 원문 메시지(절대 경로 포함)와 스택이 함께 찍히므로,
+ * 파일 시스템 오류(code가 있는 시스템 오류)는 이름과 code만, 그 밖의 Error는 message만, 나머지는 String()으로 줄인다.
+ */
+function describeError(error: unknown): string {
+	if (error instanceof Error) {
+		const code = (error as NodeJS.ErrnoException).code
+		return code ? `${error.name} ${code}` : error.message
+	}
+	return String(error)
+}
+
 /** 파일 이름 매처: suffix는 접미어 일치, exact는 정확한 이름 일치 (둘 다 대소문자 구분) */
 type FileNameMatcher = { suffix?: string; exact?: string }
 
@@ -111,10 +123,10 @@ function findFilesWithRipgrep(rgPath: string, projectPath: string, patterns: str
 		// 상대 경로(프로젝트 디렉터리 이름)로 넘겨, 글롭이 프로젝트 상위 경로의 src/test·src/it에는 걸리지 않게 한다
 		// (fs 경로의 shouldSkipDirectory와 같은 결과). 절대 경로를 넘기면 cwd가 심볼릭 링크를 거칠 때(macOS /var → /private/var)
 		// 접두어가 떼어지지 않아 절대 경로 전체가 매칭되고, cwd를 프로젝트 자신으로 두면 루트 이름이 src일 때 src/test가 제외되지 않는다.
+		// 검색 경로 앞에 `--`로 옵션 끝을 명시한다: 디렉터리 이름이 `-x`·`-L`처럼 `-`로 시작하면 rg가 옵션으로 읽어
+		// 프로젝트 밖(cwd 전체)을 훑거나 심볼릭 링크를 따라가게 된다
 		const absoluteProjectPath = path.resolve(projectPath)
 		const cwd = path.dirname(absoluteProjectPath)
-		// [mcp-check 전용 수정 — 업스트림 반영 예정] 디렉터리 이름이 '-' 로 시작하면 rg 가 옵션으로 읽어 projectPath 밖(cwd 전체)을
-		// 스캔할 수 있으므로 '--' 로 옵션 끝을 명시한다. projectPath 는 MCP 클라이언트(LLM) 입력이다.
 		args.push("--", path.relative(cwd, absoluteProjectPath) || ".")
 		const rg = spawn(rgPath, args, { cwd, stdio: ["ignore", "pipe", "ignore"] })
 
@@ -139,7 +151,7 @@ function findFilesWithRipgrep(rgPath: string, projectPath: string, patterns: str
 		})
 
 		rg.on("error", (error) => {
-			console.error(`Error running ripgrep: ${error.message}`)
+			console.error(`Error running ripgrep: ${describeError(error)}`)
 			resolve([])
 		})
 	})
@@ -177,7 +189,7 @@ function findFilesWithFs(dirPath: string, matchers: FileNameMatcher[]): string[]
 			}
 		}
 	} catch (error) {
-		console.error(`Error reading directory ${path.basename(dirPath)}:`, error)
+		console.error(`Error reading directory ${path.basename(dirPath)}: ${describeError(error)}`)
 	}
 
 	return results
@@ -249,7 +261,7 @@ interface ControllerCheckResult {
  *    - 클래스 레벨에 @RequestMapping이 있으면 메서드 레벨 mapping은 선택 사항
  *    - 메서드 레벨에만 mapping이 있어도 OK
  */
-function checkControllerMethods(filePath: string): ControllerCheckResult {
+function checkControllerMethods(filePath: string, readFile: ReadFile): ControllerCheckResult {
 	const result: ControllerCheckResult = {
 		hasControllerAnnotation: false,
 		hasAllMappings: false,
@@ -259,7 +271,7 @@ function checkControllerMethods(filePath: string): ControllerCheckResult {
 	}
 
 	try {
-		const content = fs.readFileSync(filePath, "utf8")
+		const content = readFile(filePath)
 		const lines = content.split("\n")
 
 		// 1. 클래스 레벨의 @Controller annotation 확인 (주석 제외)
@@ -393,7 +405,7 @@ function checkControllerMethods(filePath: string): ControllerCheckResult {
 		)
 		return result
 	} catch (error) {
-		console.error(`Error checking controller methods in ${path.basename(filePath)}:`, error)
+		console.error(`Error checking controller methods in ${path.basename(filePath)}: ${describeError(error)}`)
 		return result
 	}
 }
@@ -437,49 +449,31 @@ function checkClassLevelRequestMapping(lines: string[]): boolean {
 	return false
 }
 
-/**
- * 파일 경로에서 Java 소스 루트(src/main/java) 디렉토리를 찾아 반환
- * 패키지 깊이에 관계없이 정확한 소스 루트를 반환
- */
-function findSourceRoot(filePath: string): string {
-	const srcMainJava = `${path.sep}src${path.sep}main${path.sep}java${path.sep}`
-	const idx = filePath.indexOf(srcMainJava)
-	if (idx !== -1) {
-		return filePath.substring(0, idx + srcMainJava.length)
-	}
-	// src/main/java를 찾지 못한 경우 fallback: 프로젝트 루트 추정
-	const srcMain = `${path.sep}src${path.sep}main${path.sep}`
-	const srcIdx = filePath.indexOf(srcMain)
-	if (srcIdx !== -1) {
-		return filePath.substring(0, srcIdx)
-	}
-	// 최후의 fallback
-	return path.dirname(path.dirname(path.dirname(filePath)))
+/** Controller·Service 점검이 공유하는 프로젝트 문맥: 수집된 .java의 FQCN 색인과 경로별 읽기 캐시 */
+interface JavaProjectContext {
+	index: JavaIndex
+	readFile: ReadFile
+}
+
+/** 파일 내용에서 이름 해석에 쓸 package 선언과 import 목록을 읽는다 */
+function sourceContextOf(content: string): SourceContext {
+	const stripped = stripJavaComments(content)
+	return { package: readPackage(stripped), imports: collectImports(stripped) }
 }
 
 /**
- * 프로젝트 내에서 특정 이름의 Java 파일을 재귀적으로 찾기
+ * 부모 클래스의 단순 이름으로 프로젝트 색인에서 부모 파일을 찾는다.
+ * 자식 파일의 package·import로 해석하고(단일 import → 같은 패키지 → 와일드카드 → 유일한 단순 이름), 해석되지 않으면
+ * 종전의 파일 이름 탐색과 같이 이름이 같은 첫 후보(정렬된 경로 순)를 쓴다. 색인은 collectProjectFiles가 projectPath
+ * 아래에서 모은 파일만 담으므로 프로젝트 밖·심볼릭 링크 너머·src/test 아래의 파일은 찾지 않고, 디렉터리를 다시 훑지 않는다.
  */
-function findJavaFile(searchPath: string, fileName: string): string | null {
-	try {
-		const files = fs.readdirSync(searchPath)
-		for (const file of files) {
-			const fullPath = path.join(searchPath, file)
-			const stat = fs.statSync(fullPath)
-
-			if (stat.isDirectory()) {
-				const found = findJavaFile(fullPath, fileName)
-				if (found) {
-					return found
-				}
-			} else if (file === fileName) {
-				return fullPath
-			}
-		}
-	} catch {
-		// 권한 없는 디렉토리는 스킵
+function findParentClassFile(index: JavaIndex, from: SourceContext, parentClassName: string): string | null {
+	const resolved = resolveTypeReference(index, from, parentClassName)
+	if (resolved.kind === "resolved") {
+		return resolved.entry.filePath
 	}
-	return null
+	const candidates = index.bySimpleName.get(parentClassName)
+	return candidates && candidates.length > 0 ? candidates[0].filePath : null
 }
 
 /**
@@ -506,7 +500,8 @@ function findExtendsParentIgnoringComments(lines: string[]): string | null {
  * maxDepth를 통해 무한 루프를 방지하며, 다단계 상속도 추적 가능
  */
 function checkParentClassExtends(
-	projectPath: string,
+	ctx: JavaProjectContext,
+	from: SourceContext,
 	parentClassName: string,
 	targetClassName: string,
 	maxDepth: number = 5,
@@ -516,17 +511,16 @@ function checkParentClassExtends(
 	}
 
 	try {
-		// 프로젝트에서 부모 클래스 파일 찾기
-		const parentClassFile = `${parentClassName}.java`
-		const parentFilePath = findJavaFile(projectPath, parentClassFile)
+		// 프로젝트 색인에서 부모 클래스 파일 찾기
+		const parentFilePath = findParentClassFile(ctx.index, from, parentClassName)
 
 		if (!parentFilePath) {
-			debugLog(`⚠️ Parent class file '${parentClassFile}' not found in project`)
+			debugLog(`⚠️ Parent class file '${parentClassName}.java' not found in project`)
 			return false
 		}
 
-		// 부모 클래스 파일 읽기
-		const content = fs.readFileSync(parentFilePath, "utf8")
+		// 부모 클래스 파일 읽기 (읽기 캐시 공유)
+		const content = ctx.readFile(parentFilePath)
 		const lines = content.split("\n")
 
 		// 대상 클래스를 직접 상속하는지 확인
@@ -544,14 +538,14 @@ function checkParentClassExtends(
 			// 프레임워크 기본 클래스가 아니라면 계속 추적
 			if (grandParentClassName !== targetClassName && grandParentClassName !== "Object") {
 				debugLog(`🔍 Tracing inheritance: ${parentClassName} → ${grandParentClassName} → ... → ${targetClassName}?`)
-				return checkParentClassExtends(projectPath, grandParentClassName, targetClassName, maxDepth - 1)
+				return checkParentClassExtends(ctx, sourceContextOf(content), grandParentClassName, targetClassName, maxDepth - 1)
 			}
 		}
 
 		debugLog(`✅ Parent class '${parentClassName}' extends '${targetClassName}': false`)
 		return false
 	} catch (error) {
-		console.error(`Error checking parent class ${parentClassName}:`, error)
+		console.error(`Error checking parent class ${parentClassName}: ${describeError(error)}`)
 		return false
 	}
 }
@@ -636,13 +630,13 @@ function implementsServiceInterface(lines: string[], className: string): boolean
  * Service 파일의 검증 (주석 제외)
  * 1. extends EgovAbstractServiceImpl 확인
  *    - 직접 상속이 아니면 부모 클래스(프로젝트마다 이름이 다른 공통 ServiceImpl 등)의 .java를
- *      소스 루트에서 찾아 EgovAbstractServiceImpl까지 상속 체인을 추적
+ *      프로젝트 .java 색인에서 찾아 EgovAbstractServiceImpl까지 상속 체인을 추적
  * 2. @Service annotation 확인
  * 3. 클래스 선언부의 implements 목록에 Service로 끝나는 인터페이스가 있는지 확인
  */
-function checkServiceFile(filePath: string): boolean[] {
+function checkServiceFile(filePath: string, ctx: JavaProjectContext): boolean[] {
 	try {
-		const content = fs.readFileSync(filePath, "utf8")
+		const content = ctx.readFile(filePath)
 		const lines = content.split("\n")
 
 		// 1. extends 체크
@@ -657,8 +651,12 @@ function checkServiceFile(filePath: string): boolean[] {
 			// 다른 클래스를 상속한 경우, 그 부모 클래스가 EgovAbstractServiceImpl을 상속하는지 체인을 추적
 			const parentClassName = findExtendsParentIgnoringComments(lines)
 			if (parentClassName && parentClassName !== "Object") {
-				const projectPath = findSourceRoot(filePath)
-				const parentExtendsAbstract = checkParentClassExtends(projectPath, parentClassName, "EgovAbstractServiceImpl")
+				const parentExtendsAbstract = checkParentClassExtends(
+					ctx,
+					sourceContextOf(content),
+					parentClassName,
+					"EgovAbstractServiceImpl",
+				)
 				extendsCheck = parentExtendsAbstract
 				debugLog(
 					`${parentExtendsAbstract ? "✅" : "❌"} ${path.basename(filePath)} extends ${parentClassName}, which extends EgovAbstractServiceImpl: ${parentExtendsAbstract}`,
@@ -680,7 +678,7 @@ function checkServiceFile(filePath: string): boolean[] {
 
 		return [extendsCheck, hasServiceAnnotation, hasImplements]
 	} catch (error) {
-		console.error(`Error checking service file ${path.basename(filePath)}:`, error)
+		console.error(`Error checking service file ${path.basename(filePath)}: ${describeError(error)}`)
 		return [false, false, false]
 	}
 }
@@ -699,9 +697,9 @@ const INJECTED_TYPE_PATTERN = /\b([A-Z]\w*(?:DAO|Dao|Mapper))\s+[A-Za-z_$][\w$]*
  * - *Mapper 타입은 DAO 레이어 판정 대상(제외 목록 제외)에 같은 이름이 있을 때만 DAO(MyBatis 매퍼)로 본다
  *   (ObjectMapper 같은 라이브러리 타입을 오탐하지 않기 위함)
  */
-function checkDaoInjection(filePath: string, daoTypeNames: ReadonlySet<string>): boolean {
+function checkDaoInjection(filePath: string, daoTypeNames: ReadonlySet<string>, readFile: ReadFile): boolean {
 	try {
-		const content = fs.readFileSync(filePath, "utf8")
+		const content = readFile(filePath)
 		const lines = content.split("\n")
 
 		for (const rawLine of lines) {
@@ -720,7 +718,7 @@ function checkDaoInjection(filePath: string, daoTypeNames: ReadonlySet<string>):
 		}
 		return false
 	} catch (error) {
-		console.error(`Error checking DAO injection in ${path.basename(filePath)}:`, error)
+		console.error(`Error checking DAO injection in ${path.basename(filePath)}: ${describeError(error)}`)
 		return false
 	}
 }
@@ -729,9 +727,9 @@ function checkDaoInjection(filePath: string, daoTypeNames: ReadonlySet<string>):
  * 파일이 abstract class인지 확인 (주석 제외)
  * abstract class는 직접 인스턴스화되지 않는 기반 클래스이므로 아키텍처 점검 대상에서 제외
  */
-function isAbstractClass(filePath: string): boolean {
+function isAbstractClass(filePath: string, readFile: ReadFile): boolean {
 	try {
-		const content = fs.readFileSync(filePath, "utf8")
+		const content = readFile(filePath)
 		const lines = content.split("\n")
 		return findRegexPatternIgnoringComments(lines, /\babstract\s+class\b/)
 	} catch {
@@ -741,14 +739,16 @@ function isAbstractClass(filePath: string): boolean {
 
 /**
  * Controller 또는 Service 레이어의 파일 목록을 점검한다
+ * context.index·readFile: 프로젝트 .java 색인과 읽기 캐시 (Service 상속 체인의 부모 파일 조회와 모든 파일 읽기에 쓴다)
  * context.daoTypeNames: Controller "DAO X" 검사에 쓸 DAO 레이어 판정 대상 타입 이름
  */
 function checkLayer(
 	fileList: string[],
 	layerType: "Controller" | "Service",
-	context: { daoTypeNames?: ReadonlySet<string> } = {},
+	context: JavaProjectContext & { daoTypeNames?: ReadonlySet<string> },
 ): ArchCheckResult[] {
 	const results: ArchCheckResult[] = []
+	const { readFile } = context
 	const daoTypeNames = context.daoTypeNames ?? new Set<string>()
 
 	try {
@@ -757,7 +757,7 @@ function checkLayer(
 			const parentPath = path.dirname(filePath)
 
 			// abstract class는 점검 대상에서 제외 (기반 클래스이므로 어노테이션/매핑이 없는 것이 정상)
-			if (isAbstractClass(filePath)) {
+			if (isAbstractClass(filePath, readFile)) {
 				debugLog(`⏭️ Skipping abstract class: ${fileName}`)
 				continue
 			}
@@ -768,9 +768,9 @@ function checkLayer(
 			let methodCounts: Pick<ArchCheckResult, "mappedMethodCount" | "methodCount" | "hasClassLevelMapping"> = {}
 
 			if (layerType === "Controller") {
-				const controllerResult = checkControllerMethods(filePath)
+				const controllerResult = checkControllerMethods(filePath, readFile)
 				// check3 'DAO X'는 소극 조건: DAO 역할 타입을 주입받지 않아야 통과
-				const injectsDao = checkDaoInjection(filePath, daoTypeNames)
+				const injectsDao = checkDaoInjection(filePath, daoTypeNames, readFile)
 				checks = [controllerResult.hasControllerAnnotation, controllerResult.hasAllMappings, !injectsDao]
 				methodCounts = {
 					mappedMethodCount: controllerResult.mappedMethodCount,
@@ -778,7 +778,7 @@ function checkLayer(
 					hasClassLevelMapping: controllerResult.hasClassLevelMapping,
 				}
 			} else {
-				checks = checkServiceFile(filePath)
+				checks = checkServiceFile(filePath, context)
 			}
 
 			// 결과 판정: Controller·Service 모두 세 항목이 모두 통과해야 OK
@@ -797,7 +797,7 @@ function checkLayer(
 			})
 		}
 	} catch (error) {
-		console.error(`Error checking ${layerType} layer:`, error)
+		console.error(`Error checking ${layerType} layer: ${describeError(error)}`)
 	}
 
 	return results
@@ -849,7 +849,7 @@ export async function checkEgovArchitecture(
 				manualGeneration: options.runtimeGeneration,
 			})
 		} catch (error) {
-			console.error("Error checking project build files:", error)
+			console.error(`Error checking project build files: ${describeError(error)}`)
 			const message = error instanceof Error ? error.message : String(error)
 			project = {
 				generation: "unknown",
@@ -874,7 +874,7 @@ export async function checkEgovArchitecture(
 		try {
 			daoOutcome = checkDaoLayer(filesEndingWith(DAO_LAYER_FILE_SUFFIXES), index, readFile, generationOf)
 		} catch (error) {
-			console.error("Error checking DAO layer:", error)
+			console.error(`Error checking DAO layer: ${describeError(error)}`)
 		}
 		results.DAO = { ...summarize(daoOutcome.results), skipped: daoOutcome.skipped }
 
@@ -889,7 +889,7 @@ export async function checkEgovArchitecture(
 				try {
 					buildFileTexts.push({ filePath, text: readFile(filePath) })
 				} catch (error) {
-					console.error(`Error reading build file ${path.basename(filePath)}:`, error)
+					console.error(`Error reading build file ${path.basename(filePath)}: ${describeError(error)}`)
 				}
 			}
 			const daoStyles = new Set(daoOutcome.results.map((r) => r.daoStyle))
@@ -908,23 +908,27 @@ export async function checkEgovArchitecture(
 			const daoFilePaths = new Set([...daoOutcome.results, ...daoOutcome.skipped].map((r) => r.filePath))
 			project.unclassifiedDataAccessFiles = findUnclassifiedDataAccessFiles(javaFiles, daoFilePaths, readFile, projectPath)
 		} catch (error) {
-			console.error("Error scanning data access configuration:", error)
+			console.error(`Error scanning data access configuration: ${describeError(error)}`)
 		}
 
 		// 4. Controller 점검 ("DAO X"는 DAO 레이어 판정 대상 타입 이름을 본다)
 		progressCallback?.(`🔍 Checking Controller layer${via}...`)
 		results.Controller = summarize(
-			checkLayer(filesEndingWith(["Controller.java"]), "Controller", { daoTypeNames: daoOutcome.judgedTypeNames }),
+			checkLayer(filesEndingWith(["Controller.java"]), "Controller", {
+				index,
+				readFile,
+				daoTypeNames: daoOutcome.judgedTypeNames,
+			}),
 		)
 
 		// 5. Service 점검
 		progressCallback?.(`🔍 Checking Service layer${via}...`)
-		results.Service = summarize(checkLayer(filesEndingWith(["ServiceImpl.java"]), "Service"))
+		results.Service = summarize(checkLayer(filesEndingWith(["ServiceImpl.java"]), "Service", { index, readFile }))
 
 		progressCallback?.(`✅ Architecture check completed${via}`)
 		return results
 	} catch (error) {
-		console.error("Architecture check error:", error)
+		console.error(`Architecture check error: ${describeError(error)}`)
 		throw error
 	}
 }
@@ -979,14 +983,21 @@ function formatMappingCheckValue(item: ArchCheckResult): string {
 	return "PASS"
 }
 
+/** 스프레드시트가 수식으로 해석할 수 있는 셀 머리: `=`·`+`·`@`·탭·CR, 또는 숫자·`.`·끝이 아닌 글자가 뒤따르는 `-` */
+const FORMULA_LEADING_PATTERN = /^(?:[=+@\t\r]|-(?![\d.]|$))/
+
 /**
- * CSV 셀 값 이스케이프 — 쉼표·큰따옴표·줄바꿈이 있으면 큰따옴표로 감싸고 안의 큰따옴표는 두 번 쓴다
+ * CSV 셀 값 이스케이프 — 모든 열(경로·파일 이름 포함)이 이 함수를 거친다
+ * - 수식으로 읽힐 수 있는 머리(FORMULA_LEADING_PATTERN)에는 `'`를 붙여 Excel 등에서 수식 주입(CSV injection)을 막는다.
+ *   `-` 하나(미사용 열 표시)와 `-5` 같은 음수 표기는 그대로 둔다
+ * - 쉼표·큰따옴표·줄바꿈이 있으면 큰따옴표로 감싸고 안의 큰따옴표는 두 번 쓴다
  */
 function csvCell(value: string): string {
-	if (/[,"\n\r]/.test(value)) {
-		return `"${value.replace(/"/g, '""')}"`
+	const guarded = FORMULA_LEADING_PATTERN.test(value) ? `'${value}` : value
+	if (/[,"\n\r]/.test(guarded)) {
+		return `"${guarded.replace(/"/g, '""')}"`
 	}
-	return value
+	return guarded
 }
 
 const DAO_STYLE_LABELS: Record<DaoStyle, string> = {
@@ -1037,14 +1048,14 @@ function saveReport(resultType: ArchLayer, outputPath: string, resultList: ArchC
 				resultType === "Controller" ? formatMappingCheckValue(item) : formatCheckValue(item.check2, layerInfo.used[1])
 			const check3Str = formatCheckValue(item.check3, layerInfo.used[2])
 
-			const report = `${item.parentPath},${item.fileName},${check1Str},${check2Str},${check3Str},${item.result}\n`
-			csvContent += report
+			csvContent +=
+				[item.parentPath, item.fileName, check1Str, check2Str, check3Str, item.result].map(csvCell).join(",") + "\n"
 		}
 
 		fs.writeFileSync(outputPath, csvContent, "utf8")
 		debugLog(`Report saved to: ${path.basename(outputPath)}`)
 	} catch (error) {
-		console.error(`Error saving report to ${path.basename(outputPath)}:`, error)
+		console.error(`Error saving report to ${path.basename(outputPath)}: ${describeError(error)}`)
 		throw error
 	}
 }
@@ -1061,7 +1072,7 @@ function saveProjectReport(outputPath: string, summary: ProjectCheckSummary): vo
 		fs.writeFileSync(outputPath, csvContent, "utf8")
 		debugLog(`Report saved to: ${path.basename(outputPath)}`)
 	} catch (error) {
-		console.error(`Error saving report to ${path.basename(outputPath)}:`, error)
+		console.error(`Error saving report to ${path.basename(outputPath)}: ${describeError(error)}`)
 		throw error
 	}
 }
@@ -1087,7 +1098,7 @@ export async function exportArchResults(results: ArchCheckResults, projectPath: 
 
 		debugLog("All reports exported successfully")
 	} catch (error) {
-		console.error("Error exporting results:", error)
+		console.error(`Error exporting results: ${describeError(error)}`)
 		throw error
 	}
 }
