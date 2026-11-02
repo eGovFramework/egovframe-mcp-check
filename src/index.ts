@@ -10,41 +10,92 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { checkArchitecture } from "./tools/checkArchitecture.js";
+import { isDebugEnabled } from "./utils/debugLog.js";
 
 const server = new McpServer({
   name: "egovframe-mcp-check",
   version: "1.0.0",
 });
 
+/**
+ * @vscode/ripgrep 의 rgPath 를 지연 로드한다.
+ * 이 패키지는 플랫폼별 바이너리 패키지(optionalDependencies)가 없으면 모듈 로드 시점에 throw 하므로,
+ * 정적 import 를 쓰면 폐쇄망·미지원 플랫폼에서 서버 기동 자체가 실패한다. 여기서 실패를 삼키고 undefined 를
+ * 돌려주면 엔진이 fs 재귀 탐색으로 대체한다 (결과는 동일, 속도만 느림).
+ */
+let rgPathPromise: Promise<string | undefined> | undefined;
+function resolveRgPath(): Promise<string | undefined> {
+  rgPathPromise ??= import("@vscode/ripgrep")
+    .then((mod) => (typeof mod.rgPath === "string" ? mod.rgPath : undefined))
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[egovframe-mcp-check] ripgrep unavailable, using fs-based file search: ${message}`);
+      return undefined;
+    });
+  return rgPathPromise;
+}
+
 server.registerTool(
   "egov_check_compliance",
   {
-    title: "eGovFrame Compliance Check",
+    title: "eGovFrame Architecture Check",
     description:
-      "Check eGovFrame project architecture compliance (Controller, Service, DAO, Mapper layers).",
+      "Statically analyze an eGovFrame (Korean e-Government Standard Framework) project for architecture compliance. " +
+      "It reads the Maven/Gradle build files to determine the eGovFrame runtime generation (3.x / 4.x / 5.x) and version " +
+      "per module, checks that the four required runtime libraries (ptl-mvc, fdl-cmmn, fdl-logging, psl-dataaccess) are " +
+      "declared directly or transitively, and verifies version consistency across modules. It then checks the Java sources " +
+      "of the Controller layer (@Controller/@RestController, request mapping annotations, no DAO injection), the Service " +
+      "layer (extends EgovAbstractServiceImpl, @Service, implements *Service) and the combined DAO / Mapper layer " +
+      "(*DAO.java, *Dao.java, *Mapper.java classified as iBatis DAO, MyBatis DAO or Mapper interface; eGov base class or " +
+      "Mapper annotation origin, @Repository or @Mapper/@EgovMapper bean annotation, and annotation package matching the " +
+      "runtime generation). Spring data-access configuration findings are reported as informational. The text report lists " +
+      "at most 30 failed files per layer and uses paths relative to projectPath. The tool only reads the project unless " +
+      "exportResults is true, in which case it writes CSV reports into the project root.",
     inputSchema: {
       projectPath: z
         .string()
         .min(1)
-        .describe("Path to eGovFrame project directory to check"),
+        .describe("Path to the eGovFrame project directory to check (absolute path recommended)"),
       exportResults: z
         .boolean()
         .optional()
-        .describe("Export detailed results to CSV files (default: false)"),
+        .describe(
+          "Write detailed CSV reports (Result_Controller/Service/DAO/Project_<date>.csv) into the project root. " +
+            "The text report shows at most 30 failed files per layer; enable this when the full list is needed (default: false)",
+        ),
+      runtimeGeneration: z
+        .enum(["3.x", "4.x", "5.x"])
+        .optional()
+        .describe(
+          "Override the eGovFrame runtime generation used for the Project check and the DAO / Mapper 'Version' check. " +
+            "Leave it unset normally: the generation is detected per module from pom.xml / build.gradle. Set it only when " +
+            "the report shows 'Runtime: unknown' or no build files, or when the user names a target generation (for example " +
+            "checking readiness for 5.x). It replaces the detected generation for every module.",
+        ),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
     },
   },
-  async ({ projectPath, exportResults }) => {
+  async ({ projectPath, exportResults, runtimeGeneration }) => {
     try {
+      const rgPath = await resolveRgPath();
       const result = await checkArchitecture({
         projectPath,
         exportResults: exportResults ?? false,
+        runtimeGeneration,
+        rgPath,
       });
       return {
         content: [{ type: "text", text: result }],
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[egovframe-mcp-check] egov_check_compliance failed:`, error);
+      // 스택 트레이스는 EGOV_CHECK_DEBUG 가 켜진 경우에만 stderr 로 남긴다
+      console.error(`[egovframe-mcp-check] egov_check_compliance failed:`, isDebugEnabled() ? error : message);
       return {
         content: [{ type: "text", text: `Error: ${message}` }],
         isError: true,
