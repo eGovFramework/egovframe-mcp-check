@@ -1,6 +1,6 @@
 {
   "name": "egovframe-mcp-check",
-  "version": "1.0.0",
+  "version": "5.1.0",
   "description": "MCP server exposing eGovFrame architecture compliance checks.",
   "private": true,
   "type": "module",
