@@ -6,15 +6,19 @@
  * Exposes a single tool: egov_check_compliance
  */
 
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { checkArchitecture } from "./tools/checkArchitecture.js";
 import { isDebugEnabled } from "./utils/debugLog.js";
 
+// 서버 이름과 버전은 package.json 한 곳에서만 관리한다 (build/index.js 기준 한 단계 위).
+const packageJson = createRequire(import.meta.url)("../package.json") as { name: string; version: string };
+
 const server = new McpServer({
-  name: "egovframe-mcp-check",
-  version: "1.0.0",
+  name: packageJson.name,
+  version: packageJson.version,
 });
 
 /**
