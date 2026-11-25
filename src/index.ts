@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { checkArchitecture } from "./tools/checkArchitecture.js";
+import { checkArchitecture, failedFileResourceLinks } from "./tools/checkArchitecture.js";
 import { isDebugEnabled } from "./utils/debugLog.js";
 
 // 서버 이름과 버전은 package.json 한 곳에서만 관리한다 (build/index.js 기준 한 단계 위).
@@ -53,7 +53,9 @@ server.registerTool(
       "(*DAO.java, *Dao.java, *Mapper.java classified as iBatis DAO, MyBatis DAO or Mapper interface; eGov base class or " +
       "Mapper annotation origin, @Repository or @Mapper/@EgovMapper bean annotation, and annotation package matching the " +
       "runtime generation). Spring data-access configuration findings are reported as informational. The text report lists " +
-      "at most 30 failed files per layer and uses paths relative to projectPath. The tool only reads the project unless " +
+      "at most 30 failed files per layer and uses paths relative to projectPath; after the text, every failed file (no limit, " +
+      "including build files of NotFound modules) is returned as a resource_link content block whose uri is the file's " +
+      "absolute file:// URI and whose description is the failure reason. The tool only reads the project unless " +
       "exportResults is true, in which case it writes CSV reports into the project root.",
     inputSchema: {
       projectPath: z
@@ -87,14 +89,15 @@ server.registerTool(
   async ({ projectPath, exportResults, runtimeGeneration }) => {
     try {
       const rgPath = await resolveRgPath();
-      const result = await checkArchitecture({
+      const report = await checkArchitecture({
         projectPath,
         exportResults: exportResults ?? false,
         runtimeGeneration,
         rgPath,
       });
+      // 텍스트 리포트 뒤에 실패 파일마다 file:// resource_link 를 붙인다 (텍스트 목록과 달리 개수 제한 없음)
       return {
-        content: [{ type: "text", text: result }],
+        content: [{ type: "text", text: report.text }, ...failedFileResourceLinks(report.failedFiles)],
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

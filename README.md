@@ -83,7 +83,7 @@ eGovFrame 프로젝트의 빌드 파일과 Java 소스를 스캔해서 Project �
 
 ### 출력 형식
 
-도구는 다음 순서의 콘솔 친화적 텍스트를 리턴합니다. 결과 안의 파일 경로는 모두 **projectPath 기준 상대 경로**(`/` 구분자) 이며 절대 경로는 쓰지 않습니다.
+도구는 다음 순서의 콘솔 친화적 텍스트를 리턴합니다. 텍스트 안의 파일 경로는 모두 **projectPath 기준 상대 경로**(`/` 구분자) 이며 절대 경로는 쓰지 않습니다. 텍스트 뒤에는 실패 파일 링크가 붙습니다 ([아래](#실패-파일-링크-resource_link) 참조).
 
 1. `📊 Overall Statistics` — Controller + Service + DAO 합계: 총 파일 수 / 통과 / 실패 / 컴플라이언스 비율 / Skipped (Project 는 파일 집계에 넣지 않음)
 2. `🏗️ Project (build files)` — 실행환경·결과, Result 값과 라이브러리 status 값의 뜻을 적은 Legend 두 줄, 버전 일관성, 모듈별 한 줄 + 필수 라이브러리 4종 상태 (모듈이 15개를 넘으면 OK 모듈은 한 줄로 접음), 데이터 접근 설정 정보, 미분류 데이터 접근 파일 (정보 항목은 각 최대 20건)
@@ -92,7 +92,24 @@ eGovFrame 프로젝트의 빌드 파일과 Java 소스를 스캔해서 Project �
 5. `Progress` — 진행 메시지 (`with ripgrep` 이 붙으면 ripgrep 으로 수집한 것)
 6. `📁 Exported Files` (exportResults 일 때 실제로 쓰인 파일 이름만 나열) 와 `💡 Tips`
 
-레이어별 실패 파일은 최대 **30개**까지 보여 주고 넘으면 `... and N more` 로 줄이며, Skipped 파일은 사유별로 최대 10개를 보여 줍니다. 전체 목록은 CSV 로 확인합니다. 점검 대상 파일이 0건이면 Compliance Rate 는 `n/a (no files checked)` 로 표기합니다. `exportResults: true` 인데 프로젝트 루트에 쓸 수 없으면 점검 결과는 그대로 돌려주고 `⚠ CSV export failed (EACCES)` 경고만 덧붙입니다.
+레이어별 실패 파일은 텍스트에서 최대 **30개**까지 보여 주고 넘으면 `... and N more` 로 줄이며, Skipped 파일은 사유별로 최대 10개를 보여 줍니다. 전체 목록은 CSV 로 확인합니다. 점검 대상 파일이 0건이면 Compliance Rate 는 `n/a (no files checked)` 로 표기합니다. `exportResults: true` 인데 프로젝트 루트에 쓸 수 없으면 점검 결과는 그대로 돌려주고 `⚠ CSV export failed (EACCES)` 경고만 덧붙입니다.
+
+#### 실패 파일 링크 (`resource_link`)
+
+텍스트 블록 뒤에는 실패로 판정된 파일마다 MCP `resource_link` 콘텐츠 블록이 하나씩 붙습니다. 텍스트 목록과 달리 **개수 제한 없이 모든 실패 파일**을 담으며, Project 섹션에서 `NotFound` 로 판정된 모듈의 빌드 파일(`pom.xml`, `build.gradle(.kts)`)도 포함합니다. 순서는 Project → DAO / Mapper → Controller → Service 입니다.
+
+```json
+{
+  "type": "resource_link",
+  "uri": "file:///home/me/sample/src/main/java/egov/sample/web/BarController.java",
+  "name": "src/main/java/egov/sample/web/BarController.java",
+  "title": "✗ src/main/java/egov/sample/web/BarController.java",
+  "description": "Controller: missing @Controller/@RestController, mapping annotation on 0/1 public methods",
+  "mimeType": "text/x-java"
+}
+```
+
+`uri` 는 클라이언트가 파일을 바로 열 수 있도록 **절대 경로 `file://` URI** 입니다 (결과에서 절대 경로가 들어가는 유일한 곳). 링크를 클릭할 수 있게 보여 줄지는 MCP 클라이언트마다 다르므로, 텍스트의 실패 목록도 그대로 유지합니다.
 
 ## 🚀 설치 (Installation)
 

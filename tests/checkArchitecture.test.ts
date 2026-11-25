@@ -8,7 +8,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { checkArchitecture } from "../src/tools/checkArchitecture.js";
+import { pathToFileURL } from "node:url";
+import { FAILED_FILES_LIMIT, checkArchitecture, failedFileResourceLinks } from "../src/tools/checkArchitecture.js";
 import { rgPath as packagedRgPath } from "@vscode/ripgrep";
 import { existsSync } from "node:fs";
 
@@ -110,7 +111,7 @@ describe("checkArchitecture — Controller 레이어", () => {
     await writeFile(`${SRC}/web/FooController.java`, compliantController);
     await writeFile(`${SRC}/web/BarController.java`, nonCompliantController);
 
-    const out = await checkArchitecture({ projectPath: tmpDir });
+    const { text: out } = await checkArchitecture({ projectPath: tmpDir });
 
     expect(out).toMatch(/Total Files: 2/);
     expect(out).toMatch(/Passed: 1 ✓/);
@@ -121,7 +122,7 @@ describe("checkArchitecture — Controller 레이어", () => {
   });
 
   it("점검 대상 파일이 없으면 0건으로 정상 완료하고 빌드 파일 부재를 알린다", async () => {
-    const out = await checkArchitecture({ projectPath: tmpDir });
+    const { text: out } = await checkArchitecture({ projectPath: tmpDir });
     expect(out).toMatch(/Total Files: 0/);
     expect(out).toContain("Compliance Rate: n/a (no files checked)");
     expect(out).toContain("No Maven/Gradle build files found");
@@ -133,7 +134,7 @@ describe("checkArchitecture — DAO / Mapper 레이어와 Project 점검", () =>
   it("Mapper IF·소문자 Dao 통과, 설정 클래스는 skipped, 어노테이션 없는 DAO 는 사유와 함께 실패한다", async () => {
     await writeDaoProjectFixture();
 
-    const out = await checkArchitecture({ projectPath: tmpDir });
+    const { text: out } = await checkArchitecture({ projectPath: tmpDir });
 
     expect(out).toContain("🗄️ DAO / Mapper Layer:");
     expect(out).toContain("Total: 3 | Passed: 2 ✓ | Failed: 1 ✗ | Skipped: 1");
@@ -152,7 +153,7 @@ describe("checkArchitecture — DAO / Mapper 레이어와 Project 점검", () =>
   it("Project 섹션에 세대 4.x·pom.xml 모듈 행·필수 라이브러리 missing 이 나온다", async () => {
     await writeDaoProjectFixture();
 
-    const out = await checkArchitecture({ projectPath: tmpDir });
+    const { text: out } = await checkArchitecture({ projectPath: tmpDir });
 
     expect(out).toContain("🏗️ Project (build files):");
     expect(out).toContain("Runtime: 4.3.0 (4.x) · Result: NotFound");
@@ -168,11 +169,103 @@ describe("checkArchitecture — DAO / Mapper 레이어와 Project 점검", () =>
   it("runtimeGeneration: '5.x' 를 넘기면 4.x @Mapper 인터페이스가 Version 체크에서 실패한다", async () => {
     await writeDaoProjectFixture();
 
-    const out = await checkArchitecture({ projectPath: tmpDir, runtimeGeneration: "5.x" });
+    const { text: out } = await checkArchitecture({ projectPath: tmpDir, runtimeGeneration: "5.x" });
 
     expect(out).toContain(`✗ ${SRC}/mapper/SampleMapper.java [Mapper IF]: Version FAIL (@Mapper → 5.x requires @EgovMapper)`);
     expect(out).toContain("Total: 3 | Passed: 1 ✓ | Failed: 2 ✗ | Skipped: 1");
     expect(out).toContain("(5.x, manual)");
+  });
+});
+
+describe("checkArchitecture — 실패 파일 resource_link", () => {
+  it("실패 파일마다 절대 경로 file:// URI·상대 경로·사유를 failedFiles 로 돌려준다 (Project → DAO → Controller 순)", async () => {
+    await writeDaoProjectFixture();
+    await writeFile(`${SRC}/web/FooController.java`, compliantController);
+    await writeFile(`${SRC}/web/BarController.java`, nonCompliantController);
+
+    const { text, failedFiles } = await checkArchitecture({ projectPath: tmpDir });
+
+    expect(failedFiles).toEqual([
+      {
+        layer: "Project",
+        relativePath: "pom.xml",
+        uri: pathToFileURL(path.join(tmpDir, "pom.xml")).href,
+        reason: expect.stringMatching(/^Project \[maven\] NotFound: psl-dataaccess: missing/),
+      },
+      {
+        layer: "DAO",
+        relativePath: `${SRC}/dao/PlainDAO.java`,
+        uri: pathToFileURL(path.join(tmpDir, SRC, "dao/PlainDAO.java")).href,
+        reason: "DAO / Mapper [no style]: Base FAIL (no egov base); Bean FAIL (no @Repository)",
+      },
+      {
+        layer: "Controller",
+        relativePath: `${SRC}/web/BarController.java`,
+        uri: pathToFileURL(path.join(tmpDir, SRC, "web/BarController.java")).href,
+        reason: "Controller: missing @Controller/@RestController, mapping annotation on 0/1 public methods",
+      },
+    ]);
+    // 텍스트 리포트에는 여전히 절대 경로가 없다
+    expect(text).not.toContain(tmpDir);
+  });
+
+  it("실패가 없으면 failedFiles 는 비어 있다", async () => {
+    await writeFile(`${SRC}/web/FooController.java`, compliantController);
+    const { failedFiles } = await checkArchitecture({ projectPath: tmpDir });
+    expect(failedFiles).toEqual([]);
+  });
+
+  it("텍스트 목록은 레이어당 30개로 줄이지만 failedFiles 는 실패 파일을 모두 담는다", async () => {
+    const count = FAILED_FILES_LIMIT + 5;
+    for (let i = 0; i < count; i++) {
+      await writeFile(
+        `${SRC}/web/Bar${i}Controller.java`,
+        nonCompliantController.replace("BarController", `Bar${i}Controller`),
+      );
+    }
+
+    const { text, failedFiles } = await checkArchitecture({ projectPath: tmpDir });
+
+    expect(failedFiles).toHaveLength(count);
+    expect(new Set(failedFiles.map((f) => f.uri)).size).toBe(count);
+    expect(text.match(/✗ .*Controller\.java/g)).toHaveLength(FAILED_FILES_LIMIT);
+    expect(text).toContain("... and 5 more (every failed file is attached as a resource link");
+  });
+
+  it("failedFileResourceLinks 는 failedFiles 를 resource_link 블록으로 1:1 변환한다", () => {
+    const uri = pathToFileURL(path.join(tmpDir, "build.gradle")).href;
+    const links = failedFileResourceLinks([
+      { layer: "DAO", relativePath: `${SRC}/dao/PlainDAO.java`, uri: "file:///p/PlainDAO.java", reason: "DAO / Mapper [no style]: x" },
+      { layer: "Project", relativePath: "build.gradle", uri, reason: "Project [gradle] NotFound: y" },
+      { layer: "Project", relativePath: "app/build.gradle.kts", uri: "file:///p/app/build.gradle.kts", reason: "z" },
+    ]);
+
+    expect(links).toEqual([
+      {
+        type: "resource_link",
+        uri: "file:///p/PlainDAO.java",
+        name: `${SRC}/dao/PlainDAO.java`,
+        title: `✗ ${SRC}/dao/PlainDAO.java`,
+        description: "DAO / Mapper [no style]: x",
+        mimeType: "text/x-java",
+      },
+      {
+        type: "resource_link",
+        uri,
+        name: "build.gradle",
+        title: "✗ build.gradle",
+        description: "Project [gradle] NotFound: y",
+        mimeType: "text/x-groovy",
+      },
+      {
+        type: "resource_link",
+        uri: "file:///p/app/build.gradle.kts",
+        name: "app/build.gradle.kts",
+        title: "✗ app/build.gradle.kts",
+        description: "z",
+        mimeType: "text/x-kotlin",
+      },
+    ]);
   });
 });
 
@@ -181,7 +274,7 @@ describe("checkArchitecture — CSV 내보내기", () => {
     await writeDaoProjectFixture();
     await writeFile(`${SRC}/web/FooController.java`, compliantController);
 
-    const out = await checkArchitecture({ projectPath: tmpDir, exportResults: true });
+    const { text: out } = await checkArchitecture({ projectPath: tmpDir, exportResults: true });
 
     const names = (await fs.readdir(tmpDir)).filter((n) => n.endsWith(".csv")).sort();
     expect(names.some((n) => /^Result_Controller_.*\.csv$/.test(n))).toBe(true);
@@ -210,7 +303,7 @@ describe("checkArchitecture — CSV 내보내기 실패", () => {
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       await fs.chmod(tmpDir, 0o555);
       try {
-        const out = await checkArchitecture({ projectPath: tmpDir, exportResults: true });
+        const { text: out } = await checkArchitecture({ projectPath: tmpDir, exportResults: true });
         expect(out).toContain("✅ eGovFrame Architecture Check Completed");
         expect(out).toMatch(/Total Files: 1/);
         expect(out).toContain("⚠ CSV export failed (EACCES)");
@@ -231,10 +324,12 @@ describe("checkArchitecture — 경로 처리", () => {
     const relativeProjectPath = path.relative(process.cwd(), tmpDir);
     expect(path.isAbsolute(relativeProjectPath)).toBe(false);
 
-    const relative = await checkArchitecture({ projectPath: relativeProjectPath });
-    const absolute = await checkArchitecture({ projectPath: tmpDir });
+    const relativeReport = await checkArchitecture({ projectPath: relativeProjectPath });
+    const absoluteReport = await checkArchitecture({ projectPath: tmpDir });
+    const relative = relativeReport.text;
 
-    expect(relative).toBe(absolute);
+    expect(relative).toBe(absoluteReport.text);
+    expect(relativeReport.failedFiles).toEqual(absoluteReport.failedFiles);
     expect(relative).toContain("- pom.xml [maven] NotFound — runtime 4.3.0 (4.x, property)");
     expect(relative).not.toContain(tmpDir);
   });
@@ -244,7 +339,7 @@ describe("checkArchitecture — 경로 처리", () => {
     await writeFile("outside/src/main/java/egov/OutController.java", compliantController);
     await writeFile(`-x/${SRC}/web/FooController.java`, compliantController);
 
-    const out = await checkArchitecture({ projectPath: path.join(tmpDir, "-x"), rgPath: bundledRg });
+    const { text: out } = await checkArchitecture({ projectPath: path.join(tmpDir, "-x"), rgPath: bundledRg });
 
     expect(out).toMatch(/Total Files: 1/);
     expect(out).toContain("with ripgrep");
@@ -255,8 +350,12 @@ describe("checkArchitecture — 경로 처리", () => {
     await writeDaoProjectFixture();
     await writeFile(`${SRC}/web/BarController.java`, nonCompliantController);
 
-    const withRg = await checkArchitecture({ projectPath: tmpDir, rgPath: bundledRg });
-    const withFs = await checkArchitecture({ projectPath: tmpDir });
+    const withRgReport = await checkArchitecture({ projectPath: tmpDir, rgPath: bundledRg });
+    const withFsReport = await checkArchitecture({ projectPath: tmpDir });
+    const withRg = withRgReport.text;
+    const withFs = withFsReport.text;
+
+    expect(withRgReport.failedFiles).toEqual(withFsReport.failedFiles);
 
     expect(withRg).toContain("with ripgrep");
     expect(withFs).not.toContain("with ripgrep");

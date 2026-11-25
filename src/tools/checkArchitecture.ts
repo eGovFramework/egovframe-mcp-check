@@ -4,11 +4,15 @@
  * 엔진(src/utils/archChecker.ts)의 결과를 LLM 이 읽는 텍스트 리포트로 만든다.
  * 결과 텍스트의 파일 경로는 모두 projectPath 기준 상대 경로("/" 구분자) 로 쓰고 절대 경로는 쓰지 않는다
  * (사용자가 넘긴 projectPath 를 입력 검증 오류 메시지에 되돌려 주는 것은 예외).
+ * 실패 파일은 텍스트와 별도로 failedFiles 로도 돌려주며, 그 uri 는 클라이언트가 파일을 열 수 있도록
+ * 절대 경로 file:// URI 다 (projectPath 하위 파일만 담는다).
  */
 
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
+import type { ResourceLink } from "@modelcontextprotocol/sdk/types.js";
 import type {
   ArchCheckResult,
   ArchCheckSummary,
@@ -31,7 +35,28 @@ export interface CheckArchitectureOptions {
   rgPath?: string;
 }
 
-/** 레이어별 실패 파일 목록의 최대 표시 수 */
+/** 실패 파일이 속한 점검 영역 */
+export type FailedFileLayer = "Project" | "DAO" | "Controller" | "Service";
+
+/** 실패로 판정된 파일 1건 — MCP resource_link 로 노출한다 */
+export interface FailedFile {
+  layer: FailedFileLayer;
+  /** projectPath 기준 상대 경로 ("/" 구분자) */
+  relativePath: string;
+  /** 절대 경로의 file:// URI */
+  uri: string;
+  /** 실패 사유 (텍스트 리포트의 사유와 같은 문구) */
+  reason: string;
+}
+
+export interface CheckArchitectureReport {
+  /** LLM 이 읽는 텍스트 리포트 (절대 경로 없음) */
+  text: string;
+  /** 실패로 판정된 모든 파일 — 개수 제한 없음. Project → DAO → Controller → Service 순 */
+  failedFiles: FailedFile[];
+}
+
+/** 레이어별 실패 파일 텍스트 목록의 최대 표시 수 (failedFiles 는 제한하지 않는다) */
 export const FAILED_FILES_LIMIT = 30;
 
 /** Skipped 사유별 파일의 최대 표시 수 */
@@ -66,6 +91,14 @@ const SKIPPED_REASON_LABELS: Record<SkippedReason, string> = {
 
 const CSV_LAYERS = ["Controller", "Service", "DAO", "Project"] as const;
 
+/** resource_link 설명의 레이어 접두어 */
+const LAYER_LABELS: Record<FailedFileLayer, string> = {
+  Project: "Project",
+  DAO: "DAO / Mapper",
+  Controller: "Controller",
+  Service: "Service",
+};
+
 /** 절대 경로를 projectPath 기준 상대 경로("/" 구분자) 로 바꾼다 */
 function relativePath(projectPath: string, filePath: string): string {
   const rel = path.relative(projectPath, filePath);
@@ -93,26 +126,61 @@ function layerCounts(summary: ArchCheckSummary, withSkipped: boolean): string {
   return withSkipped ? `${base} | Skipped: ${summary.skipped?.length ?? 0}` : base;
 }
 
+/** resource_link 의 mimeType — 점검 대상 파일 확장자별 */
+function mimeTypeOf(relPath: string): string | undefined {
+  if (relPath.endsWith(".java")) return "text/x-java";
+  if (relPath.endsWith(".xml")) return "application/xml";
+  if (relPath.endsWith(".gradle")) return "text/x-groovy";
+  if (relPath.endsWith(".kts")) return "text/x-kotlin";
+  return undefined;
+}
+
+/** 실패 파일을 MCP resource_link 콘텐츠 블록으로 바꾼다 (개수 제한 없음) */
+export function failedFileResourceLinks(failedFiles: FailedFile[]): ResourceLink[] {
+  return failedFiles.map((f) => {
+    const mimeType = mimeTypeOf(f.relativePath);
+    return {
+      type: "resource_link",
+      uri: f.uri,
+      name: f.relativePath,
+      title: `✗ ${f.relativePath}`,
+      description: f.reason,
+      ...(mimeType ? { mimeType } : {}),
+    };
+  });
+}
+
+/** 실패 파일 1건을 failedFiles 항목으로 만든다 */
+function failedFile(projectPath: string, layer: FailedFileLayer, filePath: string, reason: string): FailedFile {
+  return { layer, relativePath: relativePath(projectPath, filePath), uri: pathToFileURL(filePath).href, reason };
+}
+
 /**
- * 실패 파일 목록을 최대 FAILED_FILES_LIMIT 개까지 출력한다.
+ * 실패 파일 목록을 최대 FAILED_FILES_LIMIT 개까지 출력하고, 실패 파일 전부를 sink 에 담는다.
  * describe 는 실패한 파일 1건의 사유 문자열(접두어 "✗ <rel path>" 뒤에 붙는 부분)을 돌려준다.
  */
 function failedFileLines(
   projectPath: string,
+  layer: Exclude<FailedFileLayer, "Project">,
   summary: ArchCheckSummary,
   describe: (r: ArchCheckResult) => string,
+  sink: FailedFile[],
 ): string[] {
   const failed = summary.results.filter((r) => r.result !== "OK");
   if (failed.length === 0) {
     return [];
   }
   const lines = [`  Failed files:`];
-  for (const r of failed.slice(0, FAILED_FILES_LIMIT)) {
-    lines.push(`    ✗ ${relativePath(projectPath, r.filePath)}${describe(r)}`);
+  for (const [index, r] of failed.entries()) {
+    const reason = describe(r);
+    sink.push(failedFile(projectPath, layer, r.filePath, `${LAYER_LABELS[layer]}${reason}`));
+    if (index < FAILED_FILES_LIMIT) {
+      lines.push(`    ✗ ${relativePath(projectPath, r.filePath)}${reason}`);
+    }
   }
   if (failed.length > FAILED_FILES_LIMIT) {
     lines.push(
-      `    ... and ${failed.length - FAILED_FILES_LIMIT} more (set exportResults: true for the full list in CSV)`,
+      `    ... and ${failed.length - FAILED_FILES_LIMIT} more (every failed file is attached as a resource link; set exportResults: true for the full list in CSV)`,
     );
   }
   return lines;
@@ -205,9 +273,25 @@ function cappedInfoLines(items: string[], indent: string): string[] {
 }
 
 /** "🏗️ Project (build files)" 섹션 */
-function projectSection(projectPath: string, project: ProjectCheckSummary | undefined): string[] {
+function projectSection(projectPath: string, project: ProjectCheckSummary | undefined, sink: FailedFile[]): string[] {
   if (!project) {
     return notChecked(`🏗️ Project (build files):`);
+  }
+  // NotFound 모듈의 빌드 파일 — 버전 불일치는 특정 파일의 실패가 아니므로 담지 않는다
+  for (const module of project.modules) {
+    if (module.result === "NotFound") {
+      const failedLibraries = module.requiredLibraries
+        .filter((lib) => lib.status === "missing" || lib.status === "excluded")
+        .map(formatRequiredLibrary);
+      sink.push(
+        failedFile(
+          projectPath,
+          "Project",
+          path.join(projectPath, ...module.buildFile.split("/")),
+          `Project [${module.buildTool}] NotFound: ${failedLibraries.join("; ")}`,
+        ),
+      );
+    }
   }
   const lines = [
     ``,
@@ -249,7 +333,7 @@ function projectSection(projectPath: string, project: ProjectCheckSummary | unde
 }
 
 /** "🗄️ DAO / Mapper Layer" 섹션 */
-function daoSection(projectPath: string, dao: ArchCheckSummary | undefined): string[] {
+function daoSection(projectPath: string, dao: ArchCheckSummary | undefined, sink: FailedFile[]): string[] {
   if (!dao) {
     return notChecked(`🗄️ DAO / Mapper Layer:`);
   }
@@ -263,21 +347,21 @@ function daoSection(projectPath: string, dao: ArchCheckSummary | undefined): str
     `  Check: Base (eGov base class / Mapper annotation origin) + Bean (@Repository or @Mapper/@EgovMapper) + Version (annotation package matches runtime generation; n/a when the generation is unknown)`,
   ];
   lines.push(
-    ...failedFileLines(projectPath, dao, (r) => {
+    ...failedFileLines(projectPath, "DAO", dao, (r) => {
       const style = r.daoStyle ? DAO_STYLE_LABELS[r.daoStyle] : "no style";
       const checks: string[] = [];
       if (!r.check1) checks.push(`Base FAIL (${r.check1Detail ?? "no detail"})`);
       if (!r.check2) checks.push(`Bean FAIL (${r.check2Detail ?? "no detail"})`);
       if (r.check3State === "fail") checks.push(`Version FAIL (${r.check3Detail ?? "no detail"})`);
       return ` [${style}]: ${checks.join("; ")}`;
-    }),
+    }, sink),
   );
   lines.push(...skippedFileLines(projectPath, dao.skipped));
   return lines;
 }
 
 /** "🎯 Controller Layer" 섹션 */
-function controllerSection(projectPath: string, controller: ArchCheckSummary | undefined): string[] {
+function controllerSection(projectPath: string, controller: ArchCheckSummary | undefined, sink: FailedFile[]): string[] {
   if (!controller) {
     return notChecked(`🎯 Controller Layer:`);
   }
@@ -288,7 +372,7 @@ function controllerSection(projectPath: string, controller: ArchCheckSummary | u
     `  Check: @Controller/@RestController + mapping annotation (class level or on every public method) + does not inject DAO/Dao/Mapper types (DAO belongs in ServiceImpl)`,
   ];
   lines.push(
-    ...failedFileLines(projectPath, controller, (r) => {
+    ...failedFileLines(projectPath, "Controller", controller, (r) => {
       const checks: string[] = [];
       if (!r.check1) checks.push("missing @Controller/@RestController");
       if (!r.check2) {
@@ -302,13 +386,13 @@ function controllerSection(projectPath: string, controller: ArchCheckSummary | u
       }
       if (!r.check3) checks.push("injects a DAO/Dao/Mapper type");
       return `: ${checks.join(", ")}`;
-    }),
+    }, sink),
   );
   return lines;
 }
 
 /** "⚙️ Service Layer" 섹션 */
-function serviceSection(projectPath: string, service: ArchCheckSummary | undefined): string[] {
+function serviceSection(projectPath: string, service: ArchCheckSummary | undefined, sink: FailedFile[]): string[] {
   if (!service) {
     return notChecked(`⚙️ Service Layer:`);
   }
@@ -319,13 +403,13 @@ function serviceSection(projectPath: string, service: ArchCheckSummary | undefin
     `  Check: extends EgovAbstractServiceImpl + @Service + implements *Service`,
   ];
   lines.push(
-    ...failedFileLines(projectPath, service, (r) => {
+    ...failedFileLines(projectPath, "Service", service, (r) => {
       const checks: string[] = [];
       if (!r.check1) checks.push("missing extends EgovAbstractServiceImpl");
       if (!r.check2) checks.push("missing @Service");
       if (!r.check3) checks.push("missing implements *Service");
       return `: ${checks.join(", ")}`;
-    }),
+    }, sink),
   );
   return lines;
 }
@@ -333,7 +417,7 @@ function serviceSection(projectPath: string, service: ArchCheckSummary | undefin
 /**
  * Check eGovFrame project architecture compliance
  */
-export async function checkArchitecture(options: CheckArchitectureOptions): Promise<string> {
+export async function checkArchitecture(options: CheckArchitectureOptions): Promise<CheckArchitectureReport> {
   const { projectPath, exportResults = false, runtimeGeneration, rgPath } = options;
 
   if (!projectPath || !projectPath.trim()) {
@@ -407,10 +491,11 @@ export async function checkArchitecture(options: CheckArchitectureOptions): Prom
     `  • Skipped (not judged): ${skippedFiles}`,
   ];
 
-  output.push(...projectSection(resolvedProjectPath, results.project));
-  output.push(...daoSection(resolvedProjectPath, results.DAO));
-  output.push(...controllerSection(resolvedProjectPath, results.Controller));
-  output.push(...serviceSection(resolvedProjectPath, results.Service));
+  const failedFileList: FailedFile[] = [];
+  output.push(...projectSection(resolvedProjectPath, results.project, failedFileList));
+  output.push(...daoSection(resolvedProjectPath, results.DAO, failedFileList));
+  output.push(...controllerSection(resolvedProjectPath, results.Controller, failedFileList));
+  output.push(...serviceSection(resolvedProjectPath, results.Service, failedFileList));
 
   output.push(``, `Progress:`, ...progressMessages.map((msg) => `  ${msg}`));
 
@@ -434,5 +519,5 @@ export async function checkArchitecture(options: CheckArchitectureOptions): Prom
     `  • Review failed files to ensure eGovFrame standards compliance`,
   );
 
-  return output.join("\n");
+  return { text: output.join("\n"), failedFiles: failedFileList };
 }
