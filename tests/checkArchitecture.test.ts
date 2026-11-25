@@ -12,8 +12,12 @@ import { pathToFileURL } from "node:url";
 import {
   FAILED_FILES_LIMIT,
   MAX_FILE_LINKS,
+  MIN_FILE_LINKS_PER_LAYER,
   checkArchitecture,
   failedFileResourceLinks,
+  selectLinkedFailedFiles,
+  type FailedFile,
+  type FailedFileLayer,
 } from "../src/tools/checkArchitecture.js";
 import { rgPath as packagedRgPath } from "@vscode/ripgrep";
 import { existsSync } from "node:fs";
@@ -245,7 +249,9 @@ describe("checkArchitecture — 실패 파일 resource_link", () => {
     expect(text).toContain(
       `🔗 Failed File Links: ${MAX_FILE_LINKS} of ${count} failed files are attached as resource_link blocks (at most ${MAX_FILE_LINKS})`,
     );
-    expect(text).toContain(`The remaining ${count - MAX_FILE_LINKS} files are not linked.`);
+    expect(text).toContain(
+      `The first ${MIN_FILE_LINKS_PER_LAYER} failed files of every layer are always linked; the remaining ${count - MAX_FILE_LINKS} files are not linked.`,
+    );
     expect(text).toContain("Use exportResults: true to write the full list to CSV files");
   });
 
@@ -269,6 +275,28 @@ describe("checkArchitecture — 실패 파일 resource_link", () => {
     expect(text).toContain("(each CSV file is also attached as a resource_link block)");
     expect(text).toContain("all 3 failed files are attached");
     expect(text).not.toContain("The remaining");
+  });
+
+  it(`selectLinkedFailedFiles 는 레이어마다 앞쪽 ${MIN_FILE_LINKS_PER_LAYER}개를 확보한 뒤 남은 자리를 순서대로 채운다`, () => {
+    const files = (layer: FailedFileLayer, n: number): FailedFile[] =>
+      Array.from({ length: n }, (_, i) => ({ layer, relativePath: `${layer}${i + 1}`, uri: `file:///p/${layer}${i + 1}`, reason: "x" }));
+    const dao = files("DAO", MAX_FILE_LINKS + 20);
+    const controller = files("Controller", 3);
+    const service = files("Service", MIN_FILE_LINKS_PER_LAYER + 3);
+    const all = [...dao, ...controller, ...service];
+
+    const linked = selectLinkedFailedFiles(all);
+
+    // 확보분: DAO 5 + Controller 3(전부) + Service 5, 남은 자리는 DAO 6번째부터 순서대로 채운다
+    const reserved = MIN_FILE_LINKS_PER_LAYER + controller.length + MIN_FILE_LINKS_PER_LAYER;
+    expect(linked).toHaveLength(MAX_FILE_LINKS);
+    expect(linked).toEqual([
+      ...dao.slice(0, MAX_FILE_LINKS - reserved + MIN_FILE_LINKS_PER_LAYER),
+      ...controller,
+      ...service.slice(0, MIN_FILE_LINKS_PER_LAYER),
+    ]);
+    // 상한 안이면 전부를 원래 순서대로 돌려준다
+    expect(selectLinkedFailedFiles([...controller, ...service])).toEqual([...controller, ...service]);
   });
 
   it("failedFileResourceLinks 는 failedFiles 를 resource_link 블록으로 1:1 변환한다 (title·mimeType 없음)", () => {

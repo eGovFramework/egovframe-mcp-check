@@ -10,7 +10,12 @@ import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { FAILED_FILES_LIMIT, MAX_FILE_LINKS, checkArchitecture } from "./tools/checkArchitecture.js";
+import {
+  FAILED_FILES_LIMIT,
+  MAX_FILE_LINKS,
+  MIN_FILE_LINKS_PER_LAYER,
+  checkArchitecture,
+} from "./tools/checkArchitecture.js";
 import { isDebugEnabled } from "./utils/debugLog.js";
 
 // 서버 이름과 버전은 package.json 한 곳에서만 관리한다 (build/index.js 기준 한 단계 위).
@@ -54,11 +59,13 @@ server.registerTool(
       "Mapper annotation origin, @Repository or @Mapper/@EgovMapper bean annotation, and annotation package matching the " +
       "runtime generation). Spring data-access configuration findings are reported as informational. The text report lists " +
       `at most ${FAILED_FILES_LIMIT} failed files per layer and uses paths relative to projectPath. After the text, failed files (including ` +
-      `build files of NotFound modules) are returned as resource_link content blocks, at most ${MAX_FILE_LINKS} in total; ` +
+      `build files of NotFound modules) are returned as resource_link content blocks, at most ${MAX_FILE_LINKS} in total ` +
+      `with the first ${MIN_FILE_LINKS_PER_LAYER} of every layer always included; ` +
       "each uri is the file's absolute file:// URI and each description is the failure reason. " +
-      "When reporting failed files to the user, show each file you mention as a Markdown link whose text is the " +
-      "relative path and whose target is the uri of its resource_link block. If there are too many to list, " +
-      "summarize by layer, but keep a link on every file you do name. Link exported CSV files the same way. " +
+      "When reporting failed files to the user, list them per layer, each as a Markdown link whose text is the " +
+      `relative path and whose target is the uri of its resource_link block. If a layer has ${MIN_FILE_LINKS_PER_LAYER} or fewer failed ` +
+      `files, list all of them; if it has more, list at least ${MIN_FILE_LINKS_PER_LAYER} and state how many more failed in that layer. ` +
+      "Link exported CSV files the same way. " +
       "When exportResults is true, the written CSV files are attached as resource_link blocks too. The tool only reads the project unless " +
       "exportResults is true, in which case it writes CSV reports into the project root.",
     inputSchema: {

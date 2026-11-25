@@ -55,7 +55,7 @@ export interface CheckArchitectureReport {
   /** 실패로 판정된 모든 파일 — 개수 제한 없음. Project → DAO → Controller → Service 순 */
   failedFiles: FailedFile[];
   /**
-   * 텍스트 뒤에 붙일 resource_link 블록 — 실패 파일 최대 MAX_FILE_LINKS 개(failedFiles 앞쪽부터) +
+   * 텍스트 뒤에 붙일 resource_link 블록 — 실패 파일 최대 MAX_FILE_LINKS 개(selectLinkedFailedFiles 참고) +
    * exportResults 로 실제 쓰인 CSV 파일
    */
   resourceLinks: ResourceLink[];
@@ -66,6 +66,12 @@ export const FAILED_FILES_LIMIT = 100;
 
 /** resource_link 로 붙이는 실패 파일의 최대 수 (전체 레이어 합계) — 링크 하나가 약 400자라 응답 크기를 묶어 둔다 */
 export const MAX_FILE_LINKS = 100;
+
+/**
+ * 레이어마다 링크를 반드시 붙이는 앞쪽 실패 파일 수 — 앞 레이어의 실패가 많아도 뒤 레이어 파일을 링크로 보여 줄 수 있게 한다.
+ * 레이어가 4개라 확보분은 최대 20개로 MAX_FILE_LINKS 안에 들어간다.
+ */
+export const MIN_FILE_LINKS_PER_LAYER = 5;
 
 /** Skipped 사유별 파일의 최대 표시 수 */
 const SKIPPED_FILES_LIMIT = 10;
@@ -139,6 +145,26 @@ export function failedFileResourceLinks(failedFiles: FailedFile[]): ResourceLink
   return failedFiles.map((f) => ({ type: "resource_link", uri: f.uri, name: f.relativePath, description: f.reason }));
 }
 
+/**
+ * resource_link 로 붙일 실패 파일을 고른다. 먼저 레이어마다 앞쪽 MIN_FILE_LINKS_PER_LAYER 개를 확보하고,
+ * 남은 자리를 failedFiles 순서대로 채워 합계 MAX_FILE_LINKS 개까지 담는다. 결과는 failedFiles 의 원래 순서를 유지한다.
+ */
+export function selectLinkedFailedFiles(failedFiles: FailedFile[]): FailedFile[] {
+  const selected = new Set<number>();
+  const perLayer = new Map<FailedFileLayer, number>();
+  failedFiles.forEach((f, index) => {
+    const count = perLayer.get(f.layer) ?? 0;
+    if (count < MIN_FILE_LINKS_PER_LAYER && selected.size < MAX_FILE_LINKS) {
+      selected.add(index);
+      perLayer.set(f.layer, count + 1);
+    }
+  });
+  for (let index = 0; index < failedFiles.length && selected.size < MAX_FILE_LINKS; index++) {
+    selected.add(index);
+  }
+  return failedFiles.filter((_, index) => selected.has(index));
+}
+
 /** exportResults 로 쓰인 CSV 파일(projectPath 바로 아래)을 resource_link 블록으로 바꾼다 */
 function csvResourceLinks(projectPath: string, fileNames: string[]): ResourceLink[] {
   return fileNames.map((name) => {
@@ -163,7 +189,7 @@ function fileLinksLines(totalFailed: number, linked: number, csvLinked: boolean)
   return [
     ``,
     `🔗 Failed File Links: ${linked} of ${totalFailed} failed files are attached as resource_link blocks (at most ${MAX_FILE_LINKS})`,
-    `  The remaining ${totalFailed - linked} files are not linked.`,
+    `  The first ${MIN_FILE_LINKS_PER_LAYER} failed files of every layer are always linked; the remaining ${totalFailed - linked} files are not linked.`,
     csvLinked
       ? `  The full list is in the exported CSV files, which are attached as resource_link blocks.`
       : `  Use exportResults: true to write the full list to CSV files (they are attached as resource_link blocks).`,
@@ -534,7 +560,7 @@ export async function checkArchitecture(options: CheckArchitectureOptions): Prom
     }
   }
 
-  const linkedFailedFiles = failedFileList.slice(0, MAX_FILE_LINKS);
+  const linkedFailedFiles = selectLinkedFailedFiles(failedFileList);
   output.push(...fileLinksLines(failedFileList.length, linkedFailedFiles.length, exportedFiles.length > 0));
 
   output.push(
