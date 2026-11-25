@@ -54,10 +54,18 @@ export interface CheckArchitectureReport {
   text: string;
   /** 실패로 판정된 모든 파일 — 개수 제한 없음. Project → DAO → Controller → Service 순 */
   failedFiles: FailedFile[];
+  /**
+   * 텍스트 뒤에 붙일 resource_link 블록 — 실패 파일 최대 MAX_FILE_LINKS 개(failedFiles 앞쪽부터) +
+   * exportResults 로 실제 쓰인 CSV 파일
+   */
+  resourceLinks: ResourceLink[];
 }
 
 /** 레이어별 실패 파일 텍스트 목록의 최대 표시 수 (failedFiles 는 제한하지 않는다) */
-export const FAILED_FILES_LIMIT = 30;
+export const FAILED_FILES_LIMIT = 100;
+
+/** resource_link 로 붙이는 실패 파일의 최대 수 (전체 레이어 합계) — 링크 하나가 약 400자라 응답 크기를 묶어 둔다 */
+export const MAX_FILE_LINKS = 100;
 
 /** Skipped 사유별 파일의 최대 표시 수 */
 const SKIPPED_FILES_LIMIT = 10;
@@ -126,28 +134,40 @@ function layerCounts(summary: ArchCheckSummary, withSkipped: boolean): string {
   return withSkipped ? `${base} | Skipped: ${summary.skipped?.length ?? 0}` : base;
 }
 
-/** resource_link 의 mimeType — 점검 대상 파일 확장자별 */
-function mimeTypeOf(relPath: string): string | undefined {
-  if (relPath.endsWith(".java")) return "text/x-java";
-  if (relPath.endsWith(".xml")) return "application/xml";
-  if (relPath.endsWith(".gradle")) return "text/x-groovy";
-  if (relPath.endsWith(".kts")) return "text/x-kotlin";
-  return undefined;
+/** 실패 파일을 MCP resource_link 콘텐츠 블록으로 바꾼다 (개수는 호출부가 정한다) */
+export function failedFileResourceLinks(failedFiles: FailedFile[]): ResourceLink[] {
+  return failedFiles.map((f) => ({ type: "resource_link", uri: f.uri, name: f.relativePath, description: f.reason }));
 }
 
-/** 실패 파일을 MCP resource_link 콘텐츠 블록으로 바꾼다 (개수 제한 없음) */
-export function failedFileResourceLinks(failedFiles: FailedFile[]): ResourceLink[] {
-  return failedFiles.map((f) => {
-    const mimeType = mimeTypeOf(f.relativePath);
+/** exportResults 로 쓰인 CSV 파일(projectPath 바로 아래)을 resource_link 블록으로 바꾼다 */
+function csvResourceLinks(projectPath: string, fileNames: string[]): ResourceLink[] {
+  return fileNames.map((name) => {
+    const layer = /^Result_([A-Za-z]+)_/.exec(name)?.[1] ?? "check";
     return {
       type: "resource_link",
-      uri: f.uri,
-      name: f.relativePath,
-      title: `✗ ${f.relativePath}`,
-      description: f.reason,
-      ...(mimeType ? { mimeType } : {}),
+      uri: pathToFileURL(path.join(projectPath, name)).href,
+      name,
+      description: `Full ${layer} check results (CSV)`,
     };
   });
+}
+
+/** "🔗 Failed File Links" 섹션 — 실패 파일 중 몇 개를 링크로 붙였는지와 나머지를 찾는 방법 */
+function fileLinksLines(totalFailed: number, linked: number, csvLinked: boolean): string[] {
+  if (totalFailed === 0) {
+    return [];
+  }
+  if (linked === totalFailed) {
+    return [``, `🔗 Failed File Links: all ${totalFailed} failed files are attached as resource_link blocks`];
+  }
+  return [
+    ``,
+    `🔗 Failed File Links: ${linked} of ${totalFailed} failed files are attached as resource_link blocks (at most ${MAX_FILE_LINKS})`,
+    `  The remaining ${totalFailed - linked} files are not linked.`,
+    csvLinked
+      ? `  The full list is in the exported CSV files, which are attached as resource_link blocks.`
+      : `  Use exportResults: true to write the full list to CSV files (they are attached as resource_link blocks).`,
+  ];
 }
 
 /** 실패 파일 1건을 failedFiles 항목으로 만든다 */
@@ -180,7 +200,7 @@ function failedFileLines(
   }
   if (failed.length > FAILED_FILES_LIMIT) {
     lines.push(
-      `    ... and ${failed.length - FAILED_FILES_LIMIT} more (every failed file is attached as a resource link; set exportResults: true for the full list in CSV)`,
+      `    ... and ${failed.length - FAILED_FILES_LIMIT} more (see "🔗 Failed File Links" below; set exportResults: true for the full list in CSV)`,
     );
   }
   return lines;
@@ -508,8 +528,14 @@ export async function checkArchitecture(options: CheckArchitectureOptions): Prom
       if (exportedFiles.length < CSV_LAYERS.length) {
         output.push(`  (a layer CSV is not written when that layer has 0 results)`);
       }
+      if (exportedFiles.length > 0) {
+        output.push(`  (each CSV file is also attached as a resource_link block)`);
+      }
     }
   }
+
+  const linkedFailedFiles = failedFileList.slice(0, MAX_FILE_LINKS);
+  output.push(...fileLinksLines(failedFileList.length, linkedFailedFiles.length, exportedFiles.length > 0));
 
   output.push(
     ``,
@@ -519,5 +545,12 @@ export async function checkArchitecture(options: CheckArchitectureOptions): Prom
     `  • Review failed files to ensure eGovFrame standards compliance`,
   );
 
-  return { text: output.join("\n"), failedFiles: failedFileList };
+  return {
+    text: output.join("\n"),
+    failedFiles: failedFileList,
+    resourceLinks: [
+      ...failedFileResourceLinks(linkedFailedFiles),
+      ...csvResourceLinks(resolvedProjectPath, exportedFiles),
+    ],
+  };
 }

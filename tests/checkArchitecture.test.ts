@@ -9,7 +9,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { pathToFileURL } from "node:url";
-import { FAILED_FILES_LIMIT, checkArchitecture, failedFileResourceLinks } from "../src/tools/checkArchitecture.js";
+import {
+  FAILED_FILES_LIMIT,
+  MAX_FILE_LINKS,
+  checkArchitecture,
+  failedFileResourceLinks,
+} from "../src/tools/checkArchitecture.js";
 import { rgPath as packagedRgPath } from "@vscode/ripgrep";
 import { existsSync } from "node:fs";
 
@@ -177,13 +182,20 @@ describe("checkArchitecture — DAO / Mapper 레이어와 Project 점검", () =>
   });
 });
 
+/** 규약을 어긴 Controller n 개 (Bar1Controller … Bar<n>Controller) */
+async function writeFailingControllers(n: number) {
+  for (let i = 1; i <= n; i++) {
+    await writeFile(`${SRC}/web/Bar${i}Controller.java`, nonCompliantController.replace("BarController", `Bar${i}Controller`));
+  }
+}
+
 describe("checkArchitecture — 실패 파일 resource_link", () => {
   it("실패 파일마다 절대 경로 file:// URI·상대 경로·사유를 failedFiles 로 돌려준다 (Project → DAO → Controller 순)", async () => {
     await writeDaoProjectFixture();
     await writeFile(`${SRC}/web/FooController.java`, compliantController);
     await writeFile(`${SRC}/web/BarController.java`, nonCompliantController);
 
-    const { text, failedFiles } = await checkArchitecture({ projectPath: tmpDir });
+    const { text, failedFiles, resourceLinks } = await checkArchitecture({ projectPath: tmpDir });
 
     expect(failedFiles).toEqual([
       {
@@ -205,34 +217,61 @@ describe("checkArchitecture — 실패 파일 resource_link", () => {
         reason: "Controller: missing @Controller/@RestController, mapping annotation on 0/1 public methods",
       },
     ]);
+    // 상한(기본 100) 안이면 실패 파일 전부가 같은 순서로 resource_link 가 된다
+    expect(resourceLinks).toEqual(failedFileResourceLinks(failedFiles));
+    expect(text).toContain("🔗 Failed File Links: all 3 failed files are attached as resource_link blocks");
     // 텍스트 리포트에는 여전히 절대 경로가 없다
     expect(text).not.toContain(tmpDir);
   });
 
-  it("실패가 없으면 failedFiles 는 비어 있다", async () => {
+  it("실패가 없으면 failedFiles·resourceLinks 가 비어 있고 링크 섹션도 없다", async () => {
     await writeFile(`${SRC}/web/FooController.java`, compliantController);
-    const { failedFiles } = await checkArchitecture({ projectPath: tmpDir });
+    const { text, failedFiles, resourceLinks } = await checkArchitecture({ projectPath: tmpDir });
     expect(failedFiles).toEqual([]);
+    expect(resourceLinks).toEqual([]);
+    expect(text).not.toContain("🔗 Failed File Links");
   });
 
-  it("텍스트 목록은 레이어당 30개로 줄이지만 failedFiles 는 실패 파일을 모두 담는다", async () => {
-    const count = FAILED_FILES_LIMIT + 5;
-    for (let i = 0; i < count; i++) {
-      await writeFile(
-        `${SRC}/web/Bar${i}Controller.java`,
-        nonCompliantController.replace("BarController", `Bar${i}Controller`),
-      );
-    }
+  it(`텍스트 목록은 레이어당 ${FAILED_FILES_LIMIT}개, 링크는 전체 ${MAX_FILE_LINKS}개까지만 내고 나머지 수와 방법을 알린다`, async () => {
+    const count = Math.max(FAILED_FILES_LIMIT, MAX_FILE_LINKS) + 5;
+    await writeFailingControllers(count);
 
-    const { text, failedFiles } = await checkArchitecture({ projectPath: tmpDir });
+    const { text, failedFiles, resourceLinks } = await checkArchitecture({ projectPath: tmpDir });
 
     expect(failedFiles).toHaveLength(count);
-    expect(new Set(failedFiles.map((f) => f.uri)).size).toBe(count);
     expect(text.match(/✗ .*Controller\.java/g)).toHaveLength(FAILED_FILES_LIMIT);
-    expect(text).toContain("... and 5 more (every failed file is attached as a resource link");
+    expect(text).toContain(`... and ${count - FAILED_FILES_LIMIT} more (see "🔗 Failed File Links" below`);
+    expect(resourceLinks).toEqual(failedFileResourceLinks(failedFiles.slice(0, MAX_FILE_LINKS)));
+    expect(text).toContain(
+      `🔗 Failed File Links: ${MAX_FILE_LINKS} of ${count} failed files are attached as resource_link blocks (at most ${MAX_FILE_LINKS})`,
+    );
+    expect(text).toContain(`The remaining ${count - MAX_FILE_LINKS} files are not linked.`);
+    expect(text).toContain("Use exportResults: true to write the full list to CSV files");
   });
 
-  it("failedFileResourceLinks 는 failedFiles 를 resource_link 블록으로 1:1 변환한다", () => {
+  it("exportResults: true 면 쓰인 CSV 파일도 resource_link 로 실패 파일 링크 뒤에 붙는다", async () => {
+    await writeFailingControllers(3);
+
+    const { text, resourceLinks } = await checkArchitecture({ projectPath: tmpDir, exportResults: true });
+
+    const csvLinks = resourceLinks.filter((l) => l.name.endsWith(".csv"));
+    expect(resourceLinks).toHaveLength(3 + csvLinks.length);
+    expect(resourceLinks.slice(0, 3).map((l) => l.name)).toEqual([1, 2, 3].map((i) => `${SRC}/web/Bar${i}Controller.java`));
+    expect(csvLinks.map((l) => l.name)).toEqual([
+      expect.stringMatching(/^Result_Controller_\d{4}-\d{2}-\d{2}\.csv$/),
+      expect.stringMatching(/^Result_Project_\d{4}-\d{2}-\d{2}\.csv$/),
+    ]);
+    for (const link of csvLinks) {
+      expect(link.uri).toBe(pathToFileURL(path.join(tmpDir, link.name)).href);
+      expect(existsSync(path.join(tmpDir, link.name))).toBe(true);
+    }
+    expect(csvLinks[0].description).toBe("Full Controller check results (CSV)");
+    expect(text).toContain("(each CSV file is also attached as a resource_link block)");
+    expect(text).toContain("all 3 failed files are attached");
+    expect(text).not.toContain("The remaining");
+  });
+
+  it("failedFileResourceLinks 는 failedFiles 를 resource_link 블록으로 1:1 변환한다 (title·mimeType 없음)", () => {
     const uri = pathToFileURL(path.join(tmpDir, "build.gradle")).href;
     const links = failedFileResourceLinks([
       { layer: "DAO", relativePath: `${SRC}/dao/PlainDAO.java`, uri: "file:///p/PlainDAO.java", reason: "DAO / Mapper [no style]: x" },
@@ -241,30 +280,9 @@ describe("checkArchitecture — 실패 파일 resource_link", () => {
     ]);
 
     expect(links).toEqual([
-      {
-        type: "resource_link",
-        uri: "file:///p/PlainDAO.java",
-        name: `${SRC}/dao/PlainDAO.java`,
-        title: `✗ ${SRC}/dao/PlainDAO.java`,
-        description: "DAO / Mapper [no style]: x",
-        mimeType: "text/x-java",
-      },
-      {
-        type: "resource_link",
-        uri,
-        name: "build.gradle",
-        title: "✗ build.gradle",
-        description: "Project [gradle] NotFound: y",
-        mimeType: "text/x-groovy",
-      },
-      {
-        type: "resource_link",
-        uri: "file:///p/app/build.gradle.kts",
-        name: "app/build.gradle.kts",
-        title: "✗ app/build.gradle.kts",
-        description: "z",
-        mimeType: "text/x-kotlin",
-      },
+      { type: "resource_link", uri: "file:///p/PlainDAO.java", name: `${SRC}/dao/PlainDAO.java`, description: "DAO / Mapper [no style]: x" },
+      { type: "resource_link", uri, name: "build.gradle", description: "Project [gradle] NotFound: y" },
+      { type: "resource_link", uri: "file:///p/app/build.gradle.kts", name: "app/build.gradle.kts", description: "z" },
     ]);
   });
 });
@@ -330,6 +348,7 @@ describe("checkArchitecture — 경로 처리", () => {
 
     expect(relative).toBe(absoluteReport.text);
     expect(relativeReport.failedFiles).toEqual(absoluteReport.failedFiles);
+    expect(relativeReport.resourceLinks).toEqual(absoluteReport.resourceLinks);
     expect(relative).toContain("- pom.xml [maven] NotFound — runtime 4.3.0 (4.x, property)");
     expect(relative).not.toContain(tmpDir);
   });

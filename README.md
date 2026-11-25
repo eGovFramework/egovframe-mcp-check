@@ -90,22 +90,26 @@ eGovFrame 프로젝트의 빌드 파일과 Java 소스를 스캔해서 Project �
 3. `🗄️ DAO / Mapper Layer` — 집계 + Style 별 수 (기반 클래스·어노테이션이 없어 Style 을 정하지 못한 파일은 `no style` 로 집계) + 실패 파일(실패한 체크만 사유와 함께) + Skipped 파일(사유별 묶음, 사유 설명과 엔진 detail 포함)
 4. `🎯 Controller Layer`, `⚙️ Service Layer` — 집계 + 실패 파일과 사유
 5. `Progress` — 진행 메시지 (`with ripgrep` 이 붙으면 ripgrep 으로 수집한 것)
-6. `📁 Exported Files` (exportResults 일 때 실제로 쓰인 파일 이름만 나열) 와 `💡 Tips`
+6. `📁 Exported Files` (exportResults 일 때 실제로 쓰인 파일 이름만 나열)
+7. `🔗 Failed File Links` — 실패 파일 중 몇 개를 링크로 붙였는지, 상한을 넘어 빠진 파일이 있으면 그 수와 찾는 방법 (실패 파일이 0개면 생략)
+8. `💡 Tips`
 
-레이어별 실패 파일은 텍스트에서 최대 **30개**까지 보여 주고 넘으면 `... and N more` 로 줄이며, Skipped 파일은 사유별로 최대 10개를 보여 줍니다. 전체 목록은 CSV 로 확인합니다. 점검 대상 파일이 0건이면 Compliance Rate 는 `n/a (no files checked)` 로 표기합니다. `exportResults: true` 인데 프로젝트 루트에 쓸 수 없으면 점검 결과는 그대로 돌려주고 `⚠ CSV export failed (EACCES)` 경고만 덧붙입니다.
+레이어별 실패 파일은 텍스트에서 최대 **100개**까지 보여 주고 넘으면 `... and N more` 로 줄이며, Skipped 파일은 사유별로 최대 10개를 보여 줍니다. 전체 목록은 CSV 로 확인합니다. 점검 대상 파일이 0건이면 Compliance Rate 는 `n/a (no files checked)` 로 표기합니다. `exportResults: true` 인데 프로젝트 루트에 쓸 수 없으면 점검 결과는 그대로 돌려주고 `⚠ CSV export failed (EACCES)` 경고만 덧붙입니다.
 
 #### 실패 파일 링크 (`resource_link`)
 
-텍스트 블록 뒤에는 실패로 판정된 파일마다 MCP `resource_link` 콘텐츠 블록이 하나씩 붙습니다. 텍스트 목록과 달리 **개수 제한 없이 모든 실패 파일**을 담으며, Project 섹션에서 `NotFound` 로 판정된 모듈의 빌드 파일(`pom.xml`, `build.gradle(.kts)`)도 포함합니다. 순서는 Project → DAO / Mapper → Controller → Service 입니다.
+텍스트 블록 뒤에는 실패로 판정된 파일마다 MCP `resource_link` 콘텐츠 블록이 하나씩 붙습니다. Project 섹션에서 `NotFound` 로 판정된 모듈의 빌드 파일(`pom.xml`, `build.gradle(.kts)`)도 포함하며, 순서는 Project → DAO / Mapper → Controller → Service 입니다.
+
+링크는 레이어 합계로 최대 **100개**까지 붙습니다. 상한을 넘으면 앞에서부터 100개만 붙이고, 텍스트의 `🔗 Failed File Links` 섹션에 빠진 파일 수와 `exportResults: true` 로 전체 목록을 CSV 로 받는 방법을 적습니다. `exportResults: true` 면 실제로 쓰인 `Result_*.csv` 파일도 실패 파일 링크 뒤에 링크로 붙습니다.
+
+상한을 두는 이유는 응답 크기입니다. 링크 하나가 약 400자라서 실패 파일이 500개인 프로젝트에서 링크를 모두 붙이면 응답이 약 19만 자가 되어, MCP 클라이언트의 도구 응답 한도를 넘을 수 있습니다. 상한 100 이면 같은 프로젝트에서 응답 전체가 약 5만 3천 자입니다.
 
 ```json
 {
   "type": "resource_link",
   "uri": "file:///home/me/sample/src/main/java/egov/sample/web/BarController.java",
   "name": "src/main/java/egov/sample/web/BarController.java",
-  "title": "✗ src/main/java/egov/sample/web/BarController.java",
-  "description": "Controller: missing @Controller/@RestController, mapping annotation on 0/1 public methods",
-  "mimeType": "text/x-java"
+  "description": "Controller: missing @Controller/@RestController, mapping annotation on 0/1 public methods"
 }
 ```
 

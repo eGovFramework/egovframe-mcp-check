@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { checkArchitecture, failedFileResourceLinks } from "./tools/checkArchitecture.js";
+import { FAILED_FILES_LIMIT, MAX_FILE_LINKS, checkArchitecture } from "./tools/checkArchitecture.js";
 import { isDebugEnabled } from "./utils/debugLog.js";
 
 // 서버 이름과 버전은 package.json 한 곳에서만 관리한다 (build/index.js 기준 한 단계 위).
@@ -53,9 +53,10 @@ server.registerTool(
       "(*DAO.java, *Dao.java, *Mapper.java classified as iBatis DAO, MyBatis DAO or Mapper interface; eGov base class or " +
       "Mapper annotation origin, @Repository or @Mapper/@EgovMapper bean annotation, and annotation package matching the " +
       "runtime generation). Spring data-access configuration findings are reported as informational. The text report lists " +
-      "at most 30 failed files per layer and uses paths relative to projectPath; after the text, every failed file (no limit, " +
-      "including build files of NotFound modules) is returned as a resource_link content block whose uri is the file's " +
-      "absolute file:// URI and whose description is the failure reason. The tool only reads the project unless " +
+      `at most ${FAILED_FILES_LIMIT} failed files per layer and uses paths relative to projectPath. After the text, failed files (including ` +
+      `build files of NotFound modules) are returned as resource_link content blocks, at most ${MAX_FILE_LINKS} in total; ` +
+      "each uri is the file's absolute file:// URI and each description is the failure reason. " +
+      "When exportResults is true, the written CSV files are attached as resource_link blocks too. The tool only reads the project unless " +
       "exportResults is true, in which case it writes CSV reports into the project root.",
     inputSchema: {
       projectPath: z
@@ -67,7 +68,8 @@ server.registerTool(
         .optional()
         .describe(
           "Write detailed CSV reports (Result_Controller/Service/DAO/Project_<date>.csv) into the project root. " +
-            "The text report shows at most 30 failed files per layer; enable this when the full list is needed (default: false)",
+            `The text report shows at most ${FAILED_FILES_LIMIT} failed files per layer and links at most ${MAX_FILE_LINKS} failed files; ` +
+            "enable this when the full list is needed (default: false)",
         ),
       runtimeGeneration: z
         .enum(["3.x", "4.x", "5.x"])
@@ -95,9 +97,9 @@ server.registerTool(
         runtimeGeneration,
         rgPath,
       });
-      // 텍스트 리포트 뒤에 실패 파일마다 file:// resource_link 를 붙인다 (텍스트 목록과 달리 개수 제한 없음)
+      // 텍스트 리포트 뒤에 실패 파일(최대 MAX_FILE_LINKS 개)과 내보낸 CSV 의 file:// resource_link 를 붙인다
       return {
-        content: [{ type: "text", text: report.text }, ...failedFileResourceLinks(report.failedFiles)],
+        content: [{ type: "text", text: report.text }, ...report.resourceLinks],
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
