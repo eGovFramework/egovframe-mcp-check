@@ -56,6 +56,9 @@ server.registerTool(
       `at most ${FAILED_FILES_LIMIT} failed files per layer and uses paths relative to projectPath. After the text, failed files (including ` +
       `build files of NotFound modules) are returned as resource_link content blocks, at most ${MAX_FILE_LINKS} in total; ` +
       "each uri is the file's absolute file:// URI and each description is the failure reason. " +
+      "When reporting failed files to the user, show each file you mention as a Markdown link whose text is the " +
+      "relative path and whose target is the uri of its resource_link block. If there are too many to list, " +
+      "summarize by layer, but keep a link on every file you do name. Link exported CSV files the same way. " +
       "When exportResults is true, the written CSV files are attached as resource_link blocks too. The tool only reads the project unless " +
       "exportResults is true, in which case it writes CSV reports into the project root.",
     inputSchema: {
