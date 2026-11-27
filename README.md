@@ -1,141 +1,156 @@
 # eGovFrame MCP Check
 
-> **eGovFrame 프로젝트의 빌드 파일과 레이어별 Java 소스를 정적 분석해 아키텍처 컴플라이언스를 판정하는 미니멀 MCP 서버**
+> 표준프레임워크 프로젝트의 빌드 파일과 레이어별 Java 소스를 정적 분석해 아키텍처 준수 여부를 점검하는 MCP 서버
 
 [![eGovFrame](https://img.shields.io/badge/eGovFrame-5.1.0-134F8C?labelColor=white&logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNzMuMjgyIDE3My4yODIiPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik0xNzMuMjgyIDg2LjY1YzAgNDcuODQ0LTM4Ljc5NCA4Ni42MzItODYuNjQ2IDg2LjYzMkMzOC43OTkgMTczLjI4MiAwIDEzNC40OTQgMCA4Ni42NSAwIDM4Ljc4OCAzOC43OTkgMCA4Ni42MzYgMGM0Ny44NTIgMCA4Ni42NDYgMzguNzg4IDg2LjY0NiA4Ni42NSIvPjxwYXRoIGZpbGw9IiMwMDM3NjQiIGQ9Ik0xMjcuMzg5IDgwLjU5OGMtMTMuNzkxLTkuMzY1LTMxLjQzOS01LjU0Mi00MC43MTcgOC41MzMtNy43MiAxMS43NjctMTkuNDA1IDEzLjIzNS0yMy45MDYgMTMuMjM1LTE0Ljc1MSAwLTI0LjgyNC0xMC4zNjctMjcuODE4LTIxLjA5NWgtLjAxYy0uMDM5LS4xMDgtLjA1OS0uMi0uMDktLjMwNy0uMDI1LS4xMi0uMDU2LS4yMzMtLjA4OS0uMzY2LTEuMTc3LTQuNDY3LTEuNDY3LTYuNjA5LTEuNDY3LTExLjM2OCAwLTI1LjY1IDI2LjMyMS01NC4yMTMgNjQuMjE1LTU0LjIxMyAzOC44MjkgMCA2MS4wNSAyOS41NDUgNjYuNzggNDUuOTc5LS4xMDctLjI5NS0uMjA5LS41ODEtLjI5MS0uODc3LTExLjAxNS0zMi4xMjUtNDEuNDc0LTU1LjIxNi03Ny4zNTctNTUuMjE2LTQ1LjEzIDAtODEuNzI5IDM2LjU5LTgxLjcyOSA4MS43MzkgMCA0MC4zNTEgMjkuMTA4IDc0Ljg5MSA2OS40NzkgNzQuODkxIDMyLjE5NyAwIDUzLjg0Mi0xOC4wNTIgNjMuNzU3LTQyLjkzIDUuNDUtMTMuNjE0IDEuNTk1LTI5LjYwNS0xMC43NTctMzguMDA1Ii8%2BPHBhdGggZmlsbD0iI2U0MDMyZSIgZD0iTTE2NC43ODggNjIuNTg5Yy00Ljc3Ny0xNi4wMjYtMjcuMTUzLTQ3LjU3MS02Ny4yODItNDcuNTcxLTM3Ljg5NCAwLTY0LjIxNCAyOC41NjMtNjQuMjE0IDU0LjIxMiAwIDQuNzU5LjI5IDYuOTAxIDEuNDY2IDExLjM2OC0uNDg5LTEuOTUxLS43NC0zLjkwOC0uNzQtNS44MjMgMC0yNi43MjEgMjYuNzQxLTQ1LjIyNyA1NC4yNDgtNDUuMjI3IDM3LjIxOCAwIDY3LjM4OCAzMC4xNzQgNjcuMzg4IDY3LjM5IDAgMjkuMTczLTE2Ljc4NSA1NC40MzctNDEuMTc5IDY2LjU2NXYuMDIzYzMxLjQ1NS0xMS4zOTEgNTMuOTA4LTQxLjUxMiA1My45MDgtNzYuODg0IDAtOC4zNzgtMS4xMjctMTUuNzU5LTMuNTk1LTI0LjA1MyIvPjwvc3ZnPg%3D%3D)](https://www.egovframe.go.kr)
-[![Node](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-## 📖 MCP 개요
+## 개요
 
-**MCP (Model Context Protocol)** 는 Anthropic 이 공개한 개방형 표준으로, LLM 클라이언트(Claude Desktop, Cursor, Claude Code 등) 와 외부 도구/데이터 소스를 안전하고 일관된 방식으로 연결합니다. MCP 서버는 stdio 또는 HTTP 위에 JSON-RPC 로 동작하며, LLM 에게 호출 가능한 **Tool** 목록과 각 Tool 의 입력 스키마를 노출합니다.
+**MCP (Model Context Protocol)** 는 Anthropic 이 공개한 개방형 표준으로, AI 클라이언트(Claude Code, Codex, Cursor, VS Code 등)와 외부 도구·데이터 소스를 일관된 방식으로 연결합니다. MCP 서버는 JSON-RPC 로 통신하면서, LLM 이 호출할 수 있는 **도구(Tool)** 목록과 각 도구의 입력 스키마를 클라이언트에 알려 줍니다. 이 서버는 stdio 전송을 사용합니다.
 
-**eGovFrame MCP Check** 는 이 MCP 표준을 따르는 정적 분석 전용 서버입니다. 사용자가 자연어로 "이 프로젝트가 전자정부 표준을 따르는지 검사해줘" 라고 요청하면 LLM 이 `egov_check_compliance` 도구를 호출하고, 서버는 다음을 결정적으로 판정합니다.
+**eGovFrame MCP Check (적용점검 MCP)** 는 전자정부 표준프레임워크(eGovFrame) 기반 프로젝트가 표준프레임워크의 아키텍처 가이드를 따르는지 점검하는 MCP 서버입니다. 사용자가 AI 클라이언트에 자연어로 "이 프로젝트가 표준프레임워크를 따르는지 점검해줘" 라고 요청하면, LLM 이 `egov_check_compliance` 도구를 호출합니다.
 
-- **Project (빌드 파일)** — `pom.xml` / `build.gradle(.kts)` 를 빌드 도구 실행 없이 읽어 모듈별 **실행환경 세대(3.x / 4.x / 5.x)·버전**, **필수 라이브러리 4종**(`ptl-mvc`, `fdl-cmmn`, `fdl-logging`, `psl-dataaccess`) 의 적용 여부, 모듈 간 **버전 일관성**을 판정합니다. 스프링 데이터 접근 설정 정보는 참고 항목으로 함께 모읍니다.
-- **Controller / Service / DAO·Mapper (통합) 세 레이어** — 각 레이어의 Java 소스를 [vscode-ripgrep](https://www.npmjs.com/package/@vscode/ripgrep) 으로 수집해 eGovFrame 표준 어노테이션·베이스 클래스 상속·세대 정합을 검사합니다. 종전의 DAO 와 Mapper 레이어는 공식 적용점검 가이드의 DAO 항목(iBatis DAO · MyBatis DAO · Mapper 인터페이스 택1) 에 맞춰 **"DAO / Mapper" 한 레이어로 통합**되었습니다.
-
-LLM 은 검사 결과 해석/요약만 수행하며, 판정 로직 자체는 모두 서버 코드에 고정되어 있습니다 — 즉 같은 프로젝트에 대해 같은 결과가 반드시 나오는 reproducible check 입니다.
+판정은 모두 서버 코드가 정해진 규칙에 따라 수행합니다. LLM 은 점검 결과를 해석하고 요약하는 역할만 맡으므로, 같은 프로젝트를 점검하면 항상 같은 결과가 나옵니다. 점검은 빌드 도구를 실행하지 않고 빌드 파일과 Java 소스를 읽기만 하는 정적 분석입니다.
 
 > 이 저장소의 점검 엔진은 VS Code 확장 [egovframe-vscode-initializr](https://github.com/eGovFramework/egovframe-vscode-initializr) 의 **Architecture Check (archChecker)** 엔진을 이식한 것이며, 판정 로직은 업스트림과 동일하게 유지합니다.
 
-## 🛠️ 제공 도구 (Tools)
+## 주요 기능
 
-이 MCP 서버는 **단 하나의 도구**만 노출합니다.
+| 기능 | 설명 |
+|------|------|
+| Project 빌드 파일 점검 | 빌드 파일(`pom.xml`, `build.gradle`, `build.gradle.kts`)로 모듈별 실행환경 적용 상태를 점검합니다. 실행환경 세대(3.x / 4.x / 5.x)와 버전, 필수 라이브러리 4종(`ptl-mvc`, `fdl-cmmn`, `fdl-logging`, `psl-dataaccess`)의 적용 여부(직접 선언과 전이 의존을 구분), 모듈 간 버전 일관성을 판정합니다. |
+| Layer 점검 | 레이어별 Java 소스가 표준프레임워크의 어노테이션과 기반 클래스를 따르는지 점검합니다. 대상은 Controller, Service, DAO / Mapper 세 레이어입니다. |
+| 점검 결과 보고 | 레이어별 준수율과 파일별 실패 사유를 보고합니다. 실패 파일은 MCP `resource_link` 로 함께 돌려주므로 클라이언트에서 바로 열 수 있고(최대 100개), 점검 결과를 CSV 4종으로 내보낼 수 있습니다. |
+
+- **빌드 도구 불필요**: Maven 이나 Gradle 을 실행하지 않고 빌드 파일을 텍스트로 읽습니다.
+- **결정적 판정**: 같은 프로젝트는 항상 같은 결과를 얻습니다.
+- **오프라인 동작**: 실행에 필요한 의존 패키지가 모두 배포 파일(tgz)에 들어 있어서, 폐쇄망에서도 사용할 수 있습니다.
+
+## 제공 도구
+
+이 MCP 서버는 도구 **하나**만 노출합니다. 리소스와 프롬프트는 노출하지 않습니다.
+
+| 도구 | 용도 |
+|------|------|
+| `egov_check_compliance` | 표준프레임워크 프로젝트의 빌드 파일과 Java 소스를 점검하고 결과를 보고 |
 
 ### `egov_check_compliance`
 
-eGovFrame 프로젝트의 빌드 파일과 Java 소스를 스캔해서 Project 판정 + 레이어별 컴플라이언스 비율 + 위반 파일 목록을 리포트합니다.
+표준프레임워크 프로젝트의 빌드 파일과 Java 소스를 점검하고 결과를 보고합니다.
 
-| 파라미터           | 타입                          | 필수 | 설명                                                                                                                                                  |
-|-------------------|------------------------------|------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
-| projectPath       | string                       | ✓    | 검사 대상 eGovFrame 프로젝트의 절대 경로                                                                                                                 |
-| exportResults     | bool                         |      | true 면 프로젝트 루트에 `Result_Controller/Service/DAO/Project_<date>.csv` 4종을 추가로 작성 (기본 false)                                                |
-| runtimeGeneration | `"3.x"` \| `"4.x"` \| `"5.x"` |      | 실행환경 세대를 수동 지정. 지정하면 Project 점검과 DAO / Mapper 의 Version 체크를 이 세대 기준으로 판정하고, 생략하면 빌드 파일에서 판정한 세대(파일이 속한 모듈 → 프로젝트) 를 씁니다 |
+| 파라미터 | 타입 | 필수 | 설명 |
+|----------|------|------|------|
+| `projectPath` | string | 필수 | 점검할 프로젝트의 절대 경로 |
+| `exportResults` | boolean | 선택 | `true` 이면 프로젝트 루트에 점검 결과 CSV 4종(`Result_Controller`, `Result_Service`, `Result_DAO`, `Result_Project`)을 저장합니다. 기본값은 `false` 입니다. |
+| `runtimeGeneration` | `"3.x"` \| `"4.x"` \| `"5.x"` | 선택 | 판정 기준으로 쓸 실행환경 세대를 지정합니다. 지정하면 Project 점검과 DAO / Mapper 의 Version 체크를 이 세대 기준으로 판정하고, 생략하면 빌드 파일에서 판정한 세대를 씁니다. |
 
-### 레이어별 검사 항목
+- 도구는 프로젝트를 읽기만 합니다. `exportResults: true` 일 때에만 프로젝트 루트에 CSV 파일을 씁니다.
+- 입력이 스키마에 맞지 않거나 `projectPath` 가 존재하는 디렉토리가 아니면 `isError: true` 인 결과가 돌아옵니다.
 
-#### Controller / Service
+#### 점검 항목
 
-| 레이어         | 파일명 패턴          | check1                                                              | check2                                                                                           | check3                                                        |
-|--------------|---------------------|---------------------------------------------------------------------|--------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
-| **Controller** | `*Controller.java`  | 클래스에 `@Controller` 또는 `@RestController`                          | 클래스 레벨 `@RequestMapping`, 또는 모든 public 메서드에 `@RequestMapping`/`@GetMapping` 등 매핑 어노테이션 | **DAO X** — `*DAO`/`*Dao` 타입이나 DAO 레이어 판정 대상 `*Mapper` 타입을 주입받지 않음 |
-| **Service**    | `*ServiceImpl.java` | `EgovAbstractServiceImpl` 상속 (직접 또는 중간 클래스 경유, 최대 5단계 추적) | `@Service`                                                                                       | 클래스 선언부의 `implements` 목록에 `*Service` 인터페이스가 있음         |
+| 영역 | 대상 파일 | 점검 항목 |
+|------|-----------|-----------|
+| Project | `pom.xml`, `build.gradle`, `build.gradle.kts` | 모듈별 실행환경 세대와 버전, 필수 라이브러리 4종의 적용 여부, 모듈 간 버전 일관성 |
+| Controller | `*Controller.java` | `@Controller` 또는 `@RestController` 선언, 요청 매핑 어노테이션 선언(클래스 레벨 `@RequestMapping` 또는 public 메서드 1개 이상), DAO 를 직접 주입받지 않음 |
+| Service | `*ServiceImpl.java` | `EgovAbstractServiceImpl` 상속, `@Service` 선언, `*Service` 인터페이스 구현 |
+| DAO / Mapper | `*DAO.java`, `*Dao.java`, `*Mapper.java` | 파일 내용으로 구현 방식(iBatis DAO, MyBatis DAO, Mapper 인터페이스)을 분류한 뒤 기반 클래스(Base), Bean 등록(Bean), 실행환경 세대와의 정합(Version) |
 
-- Controller 의 check2 는 메서드 단위로 집계되어 결과에 `mapped/total` 수가 실립니다 (예: `mapping annotation on 0/1 public methods`). 클래스 레벨 `@RequestMapping` 이 있으면 메서드 매핑 없이도 통과합니다.
-- Controller "DAO X" 는 `ObjectMapper` 같은 라이브러리 타입을 오탐하지 않도록 `*Mapper` 타입은 DAO 레이어 판정 대상에 같은 이름이 있을 때만 DAO 로 봅니다.
-- `abstract` 클래스는 두 레이어 모두 점검 대상에서 제외합니다.
+Project 점검은 참고 정보도 함께 모읍니다. 데이터 접근 설정(`SqlSessionFactoryBean`, `MapperConfigurer`, `@MapperScan` 등)이 있는지와, 점검 대상 밖에서 `JdbcTemplate` 등으로 데이터에 직접 접근하는 파일의 목록입니다. 이 정보는 판정에 반영하지 않습니다.
 
-#### DAO / Mapper (통합)
+DAO / Mapper 레이어는 `abstract` 클래스, `@Configuration` 클래스, Spring Data 저장소, MapStruct 매퍼처럼 판정 대상이 아닌 파일을 판정에서 빼고 사유와 함께 따로 보여 줍니다.
 
-`*DAO.java`, `*Dao.java`, `*Mapper.java` 를 함께 모아 **파일 내용**으로 구현 방식을 분류한 뒤 세 항목을 판정합니다. 판정식은 `OK ⇔ Base ∧ Bean ∧ Version ≠ FAIL` 입니다.
+항목별 판정 조건, 필수 라이브러리의 상태 값, 판정에서 빼는 파일의 사유는 [`docs/reference/CHECK_RULES.md`](docs/reference/CHECK_RULES.md) 에 있습니다.
 
-| 구현 방식 (Style)   | 분류 기준                                          | Base (check1)                                | Bean (check2)                                         | Version (check3)                                                      |
-|--------------------|---------------------------------------------------|----------------------------------------------|-------------------------------------------------------|-----------------------------------------------------------------------|
-| **iBatis DAO**     | 상속 체인 종점이 `EgovAbstractDAO`                   | 상속 체인이 eGov 기반 클래스에 도달 (중간 클래스 경유 허용) | `@Repository` (기반 클래스를 프로젝트 안에 복사한 경우는 실패)   | 기반 클래스 패키지가 세대와 일치 (3.x → `egovframework.rte…`, 4.x/5.x → `org.egovframe.rte…`) |
-| **MyBatis DAO**    | 상속 체인 종점이 `EgovAbstractMapper`                | 같음                                          | 같음                                                   | 같음                                                                   |
-| **Mapper IF**      | `@Mapper` 또는 `@EgovMapper` 가 붙은 인터페이스        | `@Mapper`/`@EgovMapper` 존재                   | 어노테이션의 import 출처가 표준프레임워크 패키지 (MyBatis `org.apache.ibatis.annotations.Mapper` 는 실패) | 어노테이션 이름과 패키지가 세대와 일치 (5.x 는 `@EgovMapper`, 3.x/4.x 는 `@Mapper`) |
+#### 점검 결과
 
-- 세대를 알 수 없으면 Version 은 `n/a`(skipped) 로 두고 판정에 넣지 않습니다.
-- 중간 클래스 경유 상속은 `package` 선언 기준 FQCN 색인으로 추적하므로 동명 클래스나 주석 안의 `extends` 를 오독하지 않습니다.
-- 다음 파일은 판정하지 않고 **Skipped** 목록에 사유와 함께 표시합니다.
+응답은 텍스트 리포트 하나와, 그 뒤에 붙는 실패 파일 링크로 이루어집니다.
 
-| 제외 사유 (reason)  | 대상                                                            |
-|-------------------|-----------------------------------------------------------------|
-| `abstract`        | `abstract` 클래스                                                 |
-| `configuration`   | `@Configuration` 이 붙은 클래스                                    |
-| `not-data-access` | eGov 기반도 스테레오타입도 없는 `*Mapper` 클래스 (RowMapper 등 비데이터 접근 Mapper) |
-| `spring-data`     | Spring Data 저장소 인터페이스 (`JpaRepository` 등 상속)              |
-| `mapstruct`       | MapStruct `@Mapper` 인터페이스                                     |
-| `base-class`      | `@Repository` 없이 다른 수집 파일의 부모로만 쓰이는 기반 클래스          |
-| `not-a-class`     | 타입 선언이 없거나 enum / record / `@interface`                     |
-| `unreadable`      | 읽을 수 없는 파일                                                  |
+- **텍스트 리포트**: 전체 통계(총 파일 수, 통과, 실패, 준수율), Project 결과, 레이어별 집계와 실패 파일의 사유가 차례로 나옵니다. 파일 경로는 모두 `projectPath` 기준 상대 경로입니다.
+- **실패 파일 링크**: 실패로 판정된 파일마다 MCP `resource_link` 블록이 붙습니다. `uri` 는 파일의 절대 경로를 나타내는 `file://` URI 이고, `description` 은 실패 사유입니다. 링크는 레이어 합계로 최대 100개까지 붙고, 레이어마다 앞쪽 5개는 먼저 확보합니다.
+- **CSV 내보내기**: `exportResults: true` 이면 프로젝트 루트에 `Result_Controller_<date>.csv`, `Result_Service_<date>.csv`, `Result_DAO_<date>.csv`, `Result_Project_<date>.csv` 를 쓰고, 그 파일도 링크로 돌려줍니다. 텍스트에는 레이어별 실패 파일을 100개까지만 실으므로, 전체 목록이 필요하면 CSV 를 씁니다.
 
-#### Project (빌드 파일)
+섹션별 내용, 링크의 선택 규칙, CSV 의 열, 오류 응답은 [`docs/reference/REPORT_FORMAT.md`](docs/reference/REPORT_FORMAT.md) 에 있습니다.
 
-| 항목                | 내용                                                                                                                                                                                                  |
-|--------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 실행환경 세대·버전     | 모듈(`pom.xml`, `build.gradle`, `build.gradle.kts`) 마다 버전 속성 → BOM(parent/import) → 의존성 버전 → 아티팩트 좌표 패턴 순으로 판정하고 근거(source/evidence) 를 함께 보고합니다. `packaging pom` 집계 모듈과 `buildSrc` 는 판정하지 않고 Skipped 로 둡니다 |
-| 필수 라이브러리 4종    | `ptl-mvc`, `fdl-cmmn`, `fdl-logging`, `psl-dataaccess` 를 집계 모듈을 뺀 **모든 모듈에 엄격 적용**합니다. 상태는 `direct` / `transitive`(내장한 실행환경 모듈 의존 그래프로 전이 도달, 경로 표시) / `excluded`(exclusion 으로 끊김) / `missing` / `unknown`(그래프 밖 표준프레임워크 아티팩트를 선언해 해석 불가) |
-| 버전 일관성          | 모듈 간 실행환경 버전이 하나로 모이는지 (`PASS` / `FAIL` / `n/a`)                                                                                                                                              |
-| 데이터 접근 설정 정보  | `src/main/resources`·`src/main/java`·`src/main/webapp/WEB-INF`·빌드 파일에서 `SqlMapClientFactoryBean`, `SqlSessionFactoryBean`, `MapperConfigurer`, `@MapperScan`, `mybatis-spring-boot-starter`, `mybatis.mapper-locations` 의 존재를 모으고, DAO / Mapper 판정과 엇갈리는 경우(Mapper IF 는 있는데 스캔 설정이 없음 등) 를 교차 경고로 표시합니다. **정보 항목이라 판정에는 영향을 주지 않습니다** |
-| 미분류 데이터 접근 파일 | DAO / Mapper 수집 글롭 밖에서 `JdbcTemplate`, `SqlSessionTemplate`, `EntityManager` 등을 직접 쓰는 파일 (정보 항목)                                                                                                 |
+## 설치
 
-### 출력 형식
+### 요구 사항
 
-도구는 다음 순서의 콘솔 친화적 텍스트를 리턴합니다. 텍스트 안의 파일 경로는 모두 **projectPath 기준 상대 경로**(`/` 구분자) 이며 절대 경로는 쓰지 않습니다. 텍스트 뒤에는 실패 파일 링크가 붙습니다 ([아래](#실패-파일-링크-resource_link) 참조).
+- **Node.js**: 18 이상 (22 권장). 터미널에서 `node -v` 로 확인합니다.
+- **운영체제와 CPU**: Windows x64, macOS (Apple Silicon, Intel), Linux x64 (glibc)
 
-1. `📊 Overall Statistics` — Controller + Service + DAO 합계: 총 파일 수 / 통과 / 실패 / 컴플라이언스 비율 / Skipped (Project 는 파일 집계에 넣지 않음)
-2. `🏗️ Project (build files)` — 실행환경·결과, Result 값과 라이브러리 status 값의 뜻을 적은 Legend 두 줄, 버전 일관성, 모듈별 한 줄 + 필수 라이브러리 4종 상태 (모듈이 15개를 넘으면 OK 모듈은 한 줄로 접음), 데이터 접근 설정 정보, 미분류 데이터 접근 파일 (정보 항목은 각 최대 20건)
-3. `🗄️ DAO / Mapper Layer` — 집계 + Style 별 수 (기반 클래스·어노테이션이 없어 Style 을 정하지 못한 파일은 `no style` 로 집계) + 실패 파일(실패한 체크만 사유와 함께) + Skipped 파일(사유별 묶음, 사유 설명과 엔진 detail 포함)
-4. `🎯 Controller Layer`, `⚙️ Service Layer` — 집계 + 실패 파일과 사유
-5. `Progress` — 진행 메시지 (`with ripgrep` 이 붙으면 ripgrep 으로 수집한 것)
-6. `📁 Exported Files` (exportResults 일 때 실제로 쓰인 파일 이름만 나열)
-7. `🔗 Failed File Links` — 실패 파일 중 몇 개를 링크로 붙였는지, 상한을 넘어 빠진 파일이 있으면 그 수와 찾는 방법 (실패 파일이 0개면 생략)
-8. `💡 Tips`
+### 1. 배포 파일(tgz) 내려받기
 
-레이어별 실패 파일은 텍스트에서 최대 **100개**까지 보여 주고 넘으면 `... and N more` 로 줄이며, Skipped 파일은 사유별로 최대 10개를 보여 줍니다. 전체 목록은 CSV 로 확인합니다. 점검 대상 파일이 0건이면 Compliance Rate 는 `n/a (no files checked)` 로 표기합니다. `exportResults: true` 인데 프로젝트 루트에 쓸 수 없으면 점검 결과는 그대로 돌려주고 `⚠ CSV export failed (EACCES)` 경고만 덧붙입니다.
+[표준프레임워크 포털](https://www.egovframe.go.kr/home/sub.do?menuNo=114)에서 사용하는 운영체제와 CPU 에 맞는 파일을 로컬에 내려받습니다. 압축은 풀지 않습니다.
 
-#### 실패 파일 링크 (`resource_link`)
+| 운영체제와 CPU | 파일 |
+|----------------|------|
+| Windows x64 | `egovframe-mcp-check-5.1.x-win32-x64.tgz` |
+| macOS (Apple Silicon) | `egovframe-mcp-check-5.1.x-darwin-arm64.tgz` |
+| macOS (Intel) | `egovframe-mcp-check-5.1.x-darwin-x64.tgz` |
+| Linux x64 (glibc) | `egovframe-mcp-check-5.1.x-linux-x64.tgz` |
 
-텍스트 블록 뒤에는 실패로 판정된 파일마다 MCP `resource_link` 콘텐츠 블록이 하나씩 붙습니다. Project 섹션에서 `NotFound` 로 판정된 모듈의 빌드 파일(`pom.xml`, `build.gradle(.kts)`)도 포함하며, 순서는 Project → DAO / Mapper → Controller → Service 입니다.
+tgz 에는 빌드된 서버와 실행에 필요한 의존 패키지가 모두 들어 있으므로, 실행할 때 다른 패키지를 내려받지 않습니다. 운영체제와 CPU 별로 파일이 나뉘는 이유는 파일 수집에 쓰는 ripgrep 실행 파일이 플랫폼마다 다르기 때문입니다. 파일별 체크섬은 [릴리스 노트](docs/release-notes/v5.1.0-beta.md#체크섬)에 있습니다.
 
-링크는 레이어 합계로 최대 **100개**까지 붙습니다. 상한을 넘으면 먼저 레이어마다 앞쪽 **5개**를 확보하고, 남은 자리를 위 순서대로 채워 100개를 맞춥니다. 그래서 앞 레이어의 실패가 많아도 뒤 레이어의 실패 파일이 최소 5개(5개 이하면 전부)는 링크로 붙습니다. 텍스트의 `🔗 Failed File Links` 섹션에 빠진 파일 수와 `exportResults: true` 로 전체 목록을 CSV 로 받는 방법을 적습니다. `exportResults: true` 면 실제로 쓰인 `Result_*.csv` 파일도 실패 파일 링크 뒤에 링크로 붙습니다.
+### 2. 서버 실행 명령
 
-상한을 두는 이유는 응답 크기입니다. 링크 하나가 약 400자라서 실패 파일이 500개인 프로젝트에서 링크를 모두 붙이면 응답이 약 19만 자가 되어, MCP 클라이언트의 도구 응답 한도를 넘을 수 있습니다. 상한 100 이면 같은 프로젝트에서 응답 전체가 약 5만 3천 자입니다.
+AI 클라이언트에는 `npx` 가 tgz 를 직접 실행하도록 등록합니다. 아래에서 `<TGZ>` 는 내려받은 tgz 파일의 절대 경로입니다.
+
+```bash
+npx -y --package=<TGZ> egovframe-mcp-check
+```
+
+Windows 에서는 `cmd /c` 로 감싸서 실행합니다.
+
+```bat
+cmd /c npx -y --package=<TGZ> egovframe-mcp-check
+```
+
+### 3. AI 클라이언트 등록
+
+`mcpServers` 형식을 쓰는 AI 클라이언트에는 다음 항목을 등록합니다. 설정 파일에 이미 `mcpServers` 가 있으면 그 안에 `egovframe-mcp-check` 항목만 추가합니다.
+
+**macOS, Linux**
 
 ```json
 {
-  "type": "resource_link",
-  "uri": "file:///home/me/sample/src/main/java/egov/sample/web/BarController.java",
-  "name": "src/main/java/egov/sample/web/BarController.java",
-  "description": "Controller: missing @Controller/@RestController, mapping annotation on 0/1 public methods"
+  "mcpServers": {
+    "egovframe-mcp-check": {
+      "command": "npx",
+      "args": ["-y", "--package=<TGZ>", "egovframe-mcp-check"]
+    }
+  }
 }
 ```
 
-`uri` 는 클라이언트가 파일을 바로 열 수 있도록 **절대 경로 `file://` URI** 입니다 (결과에서 절대 경로가 들어가는 유일한 곳). 링크를 클릭할 수 있게 보여 줄지는 MCP 클라이언트마다 다르므로, 텍스트의 실패 목록도 그대로 유지합니다. 채팅 답변에 링크를 옮겨 적을지는 LLM 이 판단하므로, 도구 description 에 레이어별로 실패 파일을 5개 이하면 전부, 넘으면 최소 5개를 `uri` 를 대상으로 하는 마크다운 링크로 보여 주라는 안내를 넣어 두었습니다 (보장되지는 않습니다).
+**Windows**
 
-## 🚀 설치 (Installation)
-
-### Prerequisites
-
-- **Node.js**: v18.0.0 이상 (v22.x 권장, `.nvmrc`)
-- **npm**: v8.0.0 이상
-
-`@vscode/ripgrep` 가 의존성으로 포함되어 있으며 `npm install` 시 자동으로 플랫폼별 ripgrep 바이너리를 다운로드합니다 — 별도 설치 불필요.
-
-### Build
-
-```bash
-npm install
-npm run build
+```json
+{
+  "mcpServers": {
+    "egovframe-mcp-check": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "--package=<TGZ>", "egovframe-mcp-check"]
+    }
+  }
+}
 ```
 
-## 🔧 MCP 클라이언트 설정 (Configuration)
+JSON 문자열 안에서는 Windows 경로의 역슬래시를 두 번씩 적거나(`C:\\mcp\\...`) 슬래시(`C:/mcp/...`)로 적습니다.
 
-### Claude Desktop
+Claude Code, Codex, Cursor, VS Code (GitHub Copilot), Cline, OpenCode, Claude Desktop 에 등록하는 방법(CLI 명령, 설정 파일의 위치와 형식)은 [`docs/setup/MCP_SETUP_GUIDE.md`](docs/setup/MCP_SETUP_GUIDE.md#ai-클라이언트별-등록) 에 있습니다. 환경 변수와 문제 해결도 같은 문서에서 다룹니다.
 
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+### 저장소를 클론해서 실행 (개발자)
+
+```bash
+git clone https://github.com/eGovFramework/egovframe-mcp-check.git
+cd egovframe-mcp-check
+npm install        # 의존성 설치. prepare 스크립트가 빌드(npm run build)까지 실행
+```
+
+`npm install` 은 의존성인 `@vscode/ripgrep` 과 함께 현재 플랫폼용 ripgrep 실행 파일도 설치하므로, ripgrep 을 따로 설치하지 않아도 됩니다. 클라이언트에는 `node` 로 `build/index.js` 를 실행하도록 등록하고, 경로는 절대 경로로 적습니다.
 
 ```json
 {
@@ -148,234 +163,210 @@ npm run build
 }
 ```
 
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json` (경로만 Windows 형식으로 치환)
+## 사용 예시
 
-### Cursor
+각 예시의 JSON 은 AI 가 `egov_check_compliance` 에 넘기는 인자입니다.
 
-`.cursor/mcp.json` 또는 settings 에서 동일한 형식으로 등록.
+### 예시 1. 기본 점검
 
-### Standalone 실행
-
-별도 MCP 클라이언트 없이 stdio 서버만 띄우려면:
-
-```bash
-node build/index.js
-# 또는 (npm link 후)
-npx egovframe-mcp-check
+```text
+User: "/workspace/board-app 이 표준프레임워크 아키텍처를 따르는지 점검해줘"
 ```
 
-## 💡 사용 예시 (Usage Examples)
-
-### 예시 1. 기본 컴플라이언스 검사
-
-```
-User: "/workspace/board-app 이 eGovFrame 표준 아키텍처를 따르는지 검사해줘"
-
-Claude: (egov_check_compliance 호출)
-```
-
-호출 입력 예:
 ```json
-{
-  "projectPath": "/workspace/board-app"
-}
+{ "projectPath": "/workspace/board-app" }
 ```
 
-출력 예 (요약):
-```
-✅ eGovFrame Architecture Check Completed
+텍스트 리포트에서 주요 줄만 추리면 다음과 같습니다. 실제 출력에는 섹션 제목 앞에 그림 문자가, 통과와 실패 수 뒤에 표시 기호가 붙지만 이 예시에서는 생략했습니다. 전체 출력 예시는 [`docs/reference/REPORT_FORMAT.md`](docs/reference/REPORT_FORMAT.md#예시) 에 있습니다.
 
-📊 Overall Statistics (Controller + Service + DAO / Mapper):
+```text
+eGovFrame Architecture Check Completed
+
+Overall Statistics (Controller + Service + DAO / Mapper):
   • Total Files: 5
-  • Passed: 3 ✓
-  • Failed: 2 ✗
+  • Passed: 3
+  • Failed: 2
   • Compliance Rate: 60%
   • Skipped (not judged): 1
 
-🏗️ Project (build files):
+Project (build files):
   Runtime: 4.3.0 (4.x) · Result: NotFound
-  Legend — Result: OK = all 4 required libraries resolved; NotFound = a required library is missing or excluded, or versions are inconsistent; Unknown = could not be resolved (not counted as failure); Skipped = aggregate build file.
-  Legend — library status: direct | transitive via <path> | excluded (cut by an <exclusion>) | missing | unknown (unresolvable, not a failure). Runtime source: property | bom | dependency-version | artifact-pattern | manual | none.
   Version consistency: PASS (4.3.0)
   Modules:
   - pom.xml [maven] NotFound — runtime 4.3.0 (4.x, property)
       ptl-mvc: direct; fdl-cmmn: transitive via ptl-mvc > fdl-cmmn; fdl-logging: transitive via ptl-mvc > fdl-cmmn > fdl-logging; psl-dataaccess: missing (not declared)
-  Data access configuration (informational, does not affect results):
-    ⚠ Mapper interfaces exist but no MapperConfigurer, @MapperScan or mybatis-spring-boot-starter was found
 
-🗄️ DAO / Mapper Layer:
-  Total: 3 | Passed: 2 ✓ | Failed: 1 ✗ | Skipped: 1
+DAO / Mapper Layer:
+  Total: 3 | Passed: 2 | Failed: 1 | Skipped: 1
   Styles: iBatis DAO 0, MyBatis DAO 1, Mapper IF 1, no style (no eGov base class or Mapper annotation) 1
-  Check: Base (eGov base class / Mapper annotation origin) + Bean (@Repository or @Mapper/@EgovMapper) + Version (annotation package matches runtime generation; n/a when the generation is unknown)
   Failed files:
-    ✗ src/main/java/egov/sample/dao/PlainDAO.java [no style]: Base FAIL (no egov base); Bean FAIL (no @Repository)
+    src/main/java/egov/sample/dao/PlainDAO.java [no style]: Base FAIL (no egov base); Bean FAIL (no @Repository)
   Skipped files (not judged):
     - configuration — @Configuration class (1): src/main/java/egov/sample/config/EgovConfigMapper.java
 
-🎯 Controller Layer:
-  Total: 2 | Passed: 1 ✓ | Failed: 1 ✗
-  Check: @Controller/@RestController + mapping annotation (class level or on every public method) + does not inject DAO/Dao/Mapper types (DAO belongs in ServiceImpl)
+Controller Layer:
+  Total: 2 | Passed: 1 | Failed: 1
   Failed files:
-    ✗ src/main/java/egov/sample/web/BarController.java: missing @Controller/@RestController, mapping annotation on 0/1 public methods
+    src/main/java/egov/sample/web/BarController.java: missing @Controller/@RestController, mapping annotation on 0/1 public methods
 
-⚙️ Service Layer:
-  Total: 0 | Passed: 0 ✓ | Failed: 0 ✗
-  Check: extends EgovAbstractServiceImpl + @Service + implements *Service
-
-Progress:
-  🔍 Checking project build files with ripgrep...
-  🔍 Checking DAO / Mapper layer with ripgrep...
-  🔍 Scanning data access configuration with ripgrep...
-  🔍 Checking Controller layer with ripgrep...
-  🔍 Checking Service layer with ripgrep...
-  ✅ Architecture check completed with ripgrep
-
-💡 Tips:
-  • Use exportResults: true to save detailed results to CSV files in the project directory
-  • Use runtimeGeneration ("3.x" | "4.x" | "5.x") to override the generation detected from build files
-  • Review failed files to ensure eGovFrame standards compliance
+Service Layer:
+  Total: 0 | Passed: 0 | Failed: 0
 ```
+
+이 응답에는 실패 파일 3개(`pom.xml`, `PlainDAO.java`, `BarController.java`)의 `resource_link` 블록이 함께 붙습니다.
 
 ### 예시 2. CSV 리포트까지 생성
 
-```
-User: "/workspace/board-app 검사 결과를 CSV 로도 뽑아줘"
-
-Claude: (egov_check_compliance 호출, exportResults: true)
-        → /workspace/board-app/Result_Controller_<date>.csv
-        → /workspace/board-app/Result_Service_<date>.csv
-        → /workspace/board-app/Result_DAO_<date>.csv
-        → /workspace/board-app/Result_Project_<date>.csv
+```text
+User: "/workspace/board-app 점검 결과를 CSV 로도 저장해줘"
 ```
 
-`<date>` 는 실행일(`YYYY-MM-DD`) 입니다. 결과가 0건인 레이어의 CSV 는 쓰지 않고, `Result_Project_<date>.csv` 는 Java 파일이 하나도 없어도 빌드 파일 판정이 있으면 작성됩니다. CSV 열은 다음과 같습니다.
+```json
+{ "projectPath": "/workspace/board-app", "exportResults": true }
+```
 
-| 파일                   | 열                                                                           |
-|-----------------------|------------------------------------------------------------------------------|
-| `Result_Controller_*` | Path, FileName, @Controller, Mapping Annotation (`PASS` / `Class level` / `a/b` / `FAIL`), DAO X, Result |
-| `Result_Service_*`    | Path, FileName, Extends EgovAbstractServiceImpl, @Service, Implements Service, Result |
-| `Result_DAO_*`        | Path, FileName, Style, Base, Bean, Version, Result                           |
-| `Result_Project_*`    | Module, Item, Status, Evidence (모듈별 runtime · 필수 라이브러리 4종 · result 행, 데이터 접근 설정 행, 미분류 파일 행, 프로젝트 전체 version-consistency · result 행) |
+프로젝트 루트에 `Result_Controller_<date>.csv`, `Result_Service_<date>.csv`, `Result_DAO_<date>.csv`, `Result_Project_<date>.csv` 가 저장됩니다. `<date>` 는 실행일(`YYYY-MM-DD`)입니다. 결과가 0건인 레이어의 CSV 는 쓰지 않고, `Result_Project_<date>.csv` 는 Java 파일이 하나도 없어도 빌드 파일 판정이 있으면 작성됩니다.
 
 ### 예시 3. 실행환경 세대를 수동 지정
 
-```
+```text
 User: "/workspace/legacy-app 은 5.x 로 올릴 예정이야. 5.x 기준으로 DAO 어노테이션이 맞는지 봐줘"
-
-Claude: (egov_check_compliance 호출, runtimeGeneration: "5.x")
-        → 4.x 용 @Mapper 인터페이스가 Version FAIL (@Mapper → 5.x requires @EgovMapper) 로 표시됨
 ```
 
-호출 입력 예:
 ```json
-{
-  "projectPath": "/workspace/legacy-app",
-  "runtimeGeneration": "5.x"
-}
+{ "projectPath": "/workspace/legacy-app", "runtimeGeneration": "5.x" }
 ```
 
-빌드 파일이 없거나 세대를 판정할 수 없는 프로젝트에서도 이 옵션으로 Version 체크를 켤 수 있습니다.
+4.x 용 `@Mapper` 인터페이스가 `Version FAIL` 로 표시되고, 사유에는 5.x 에서는 `@EgovMapper` 가 필요하다는 내용이 실립니다. 빌드 파일이 없거나 세대를 판정할 수 없는 프로젝트에서도 이 파라미터로 Version 체크를 켤 수 있습니다.
 
 ### 예시 4. codegen 으로 만든 직후 검증
 
-```
-User: "방금 만든 board-app 이 표준에 맞는지 바로 확인하고,
-       문제 있으면 위반 파일 보여줘"
-
-Claude: (egov_check_compliance 호출 후, 실패 파일 목록과 사유를 사람이 읽기 좋게 정리)
+```text
+User: "방금 만든 board-app 이 표준에 맞는지 바로 확인하고, 문제가 있으면 위반 파일을 보여줘"
 ```
 
-> 💡 **Tip** — [`egovframe-mcp-codegen`](../egovframe-mcp-codegen) 으로 생성한 프로젝트는 모든 레이어가 자동으로 표준을 만족하도록 템플릿화되어 있어, 신규 스캐폴드 직후의 검사 결과는 100% 가 기대값입니다. 이 도구의 진가는 **legacy 코드** 또는 **수동으로 추가한 컴포넌트** 검사에서 드러납니다. 단, Project 항목은 필수 라이브러리 4종을 모든 모듈에 엄격 적용하므로 배치·MSA 같은 템플릿은 누락 라이브러리가 근거와 함께 `NotFound` 로 표시될 수 있습니다.
+[`egovframe-mcp-codegen`](https://github.com/eGovFramework/egovframe-mcp-codegen) 으로 생성한 프로젝트는 레이어 점검을 통과하도록 템플릿이 만들어져 있습니다. 그래서 이 도구는 기존 코드나 손으로 추가한 클래스를 점검할 때 더 쓸모가 있습니다. 다만 Project 항목은 필수 라이브러리 4종을 모든 모듈에 적용하므로, 배치나 MSA 같은 템플릿은 빠진 라이브러리가 근거와 함께 `NotFound` 로 표시될 수 있습니다.
 
-## 🗂️ 폴더 구조 (Project Structure)
+## 제약 사항
 
-```
+- 점검 범위는 **Java 소스와 표준프레임워크의 어노테이션·기반 클래스**로 한정됩니다. Kotlin 이나 Groovy 소스는 점검하지 않습니다. 표준프레임워크의 기반 클래스를 상속하지 않고 Spring 표준만 따르는 `*ServiceImpl`, `*DAO` 클래스는 실패로 보고됩니다.
+- Mapper XML 의 SQL 내용은 점검하지 않습니다. 설정 파일(XML, yml, properties, Java Config)과 빌드 파일에서는 데이터 접근 설정의 **존재 여부**만 정보 항목으로 모으며 판정에 넣지 않습니다.
+- 빌드 파일은 빌드 도구를 실행하지 않고 텍스트로 읽습니다. Gradle 은 일반적인 선언 형태만 인식하고, 번들, 루프, 헬퍼 함수, conventions 플러그인처럼 해석이 확실하지 않은 형태는 추측하지 않고 `unknown` 으로 남깁니다.
+- 필수 라이브러리의 전이 의존은 서버에 내장한 실행환경 모듈 의존 그래프(3.9.x, 3.10.x, 4.0.x, 4.1.x, 4.2.x, 4.3.x, 5.0.x, 5.1.x)로 판정합니다. 5.1.x 그래프는 5.1.0 베타 기준이며, 프로젝트 밖에 있는 parent POM 과 BOM 은 읽지 않습니다.
+- Controller 와 Service 는 소스를 줄 단위로 읽어서 판정합니다. 클래스 선언의 `{` 를 다음 줄에 쓰는 코드처럼 일부 형식에서는 어노테이션을 인식하지 못할 수 있습니다.
+- 점검은 **정적 분석**입니다. 런타임에 Bean 이 실제로 등록되는지, 트랜잭션 전파가 올바른지는 판정하지 않습니다.
+
+인식 범위의 상세한 내용은 [`docs/reference/CHECK_RULES.md`](docs/reference/CHECK_RULES.md#한계) 에 있습니다.
+
+## 기술 스택
+
+| 구분 | 내용 |
+|------|------|
+| Protocol | MCP (Model Context Protocol), stdio 전송 |
+| MCP SDK | `@modelcontextprotocol/sdk` v1.29.0 |
+| Language | TypeScript v5.9.3 |
+| Runtime | Node.js 18 이상 (Node.js 22 권장) |
+| File Search | `@vscode/ripgrep` v1.18.0 |
+| Schema Validation | `zod` v4.4.3 |
+| Test | Vitest v1.6.1 |
+
+## 폴더 구조
+
+```text
 egovframe-mcp-check/
 ├── src/
-│   ├── index.ts                      # MCP 서버 진입점 (egov_check_compliance 만 등록, rgPath 지연 로드·주입)
+│   ├── index.ts                      # MCP 서버 진입점 (egov_check_compliance 등록, ripgrep 경로 지연 로드)
 │   ├── tools/
-│   │   └── checkArchitecture.ts      # 도구 진입 — projectPath 검증 + 엔진 호출 + 텍스트 리포트 생성
-│   ├── shared/                       # 결과 계약 (업스트림과 공유하는 순수 타입·함수)
+│   │   └── checkArchitecture.ts      # 도구 진입: projectPath 검증, 엔진 호출, 텍스트 리포트와 링크 생성
+│   ├── shared/                       # 결과 계약 (업스트림과 공유하는 타입과 함수)
 │   │   ├── archCheck.ts              #   결과 타입 (ArchCheckResults, ProjectCheckSummary 등)
 │   │   └── archCheckReport.ts        #   Project 결과를 Module/Item/Status/Evidence 행으로 펴는 projectReportRows
-│   └── utils/                        # 점검 엔진 (업스트림 egovframe-vscode-initializr 와 동일 로직)
-│       ├── archChecker.ts            #   진입점 checkEgovArchitecture / exportArchResults, 파일 수집(ripgrep/fs), Controller·Service 판정, CSV 작성
-│       ├── daoCheck.ts               #   DAO / Mapper 통합 레이어 — 분류·제외 규칙, 상속 체인 추적, Base/Bean/Version 판정
-│       ├── buildFileCheck.ts         #   Project 항목 — 모듈별 세대·버전, 필수 4종, 버전 일관성, 파일→모듈 세대 매핑
-│       ├── dataAccessConfigScan.ts   #   데이터 접근 설정 정보 + 미분류 데이터 접근 파일
-│       ├── runtimeModuleGraph.ts     #   실행환경 브랜치별 모듈 의존 그래프 상수 + 전이 도달 판정
-│       ├── mavenPom.ts               #   pom.xml 파서 (parent·properties·dependencies·dependencyManagement·modules, ${…} 치환)
-│       ├── gradleBuild.ts            #   build.gradle(.kts)·settings.gradle·gradle.properties·libs.versions.toml 파서
-│       ├── javaIndex.ts              #   .java FQCN 색인 + Java 이름 해석 순서의 타입 참조 해석
+│   └── utils/                        # 점검 엔진 (업스트림 egovframe-vscode-initializr 와 같은 로직)
+│       ├── archChecker.ts            #   엔진 진입점, 파일 수집(ripgrep/fs), Controller·Service 판정, CSV 작성
+│       ├── daoCheck.ts               #   DAO / Mapper 레이어: 분류와 제외 규칙, 상속 체인 추적, Base/Bean/Version 판정
+│       ├── buildFileCheck.ts         #   Project 항목: 모듈별 세대와 버전, 필수 라이브러리 4종, 버전 일관성
+│       ├── dataAccessConfigScan.ts   #   데이터 접근 설정 정보, 미분류 데이터 접근 파일
+│       ├── runtimeModuleGraph.ts     #   실행환경 브랜치별 모듈 의존 그래프 상수, 전이 도달 판정
+│       ├── mavenPom.ts               #   pom.xml 파서
+│       ├── gradleBuild.ts            #   build.gradle(.kts), settings.gradle, gradle.properties, libs.versions.toml 파서
+│       ├── javaIndex.ts              #   .java 파일의 FQCN 색인, 타입 참조 해석
 │       ├── javaSource.ts             #   주석 제거, package/import 수집, 타입 선언부 추출, 읽기 캐시
-│       └── debugLog.ts               #   EGOV_CHECK_DEBUG 로 gating 되는 stderr 정보성 로그
+│       └── debugLog.ts               #   EGOV_CHECK_DEBUG 가 켜졌을 때만 쓰는 stderr 정보성 로그
 │
-├── tests/                            # vitest (tests/**/*.test.ts)
-│   ├── checkArchitecture.test.ts     #   도구 리포트·입력 검증·stdout 청결·로그 gating (임시 fixture 프로젝트)
-│   ├── archChecker.test.ts, daoCheck.test.ts, buildFileCheck.test.ts, dataAccessConfigScan.test.ts,
-│   │   runtimeModuleGraph.test.ts, mavenPom.test.ts, gradleBuild.test.ts, javaIndex.test.ts,
-│   │   javaSource.test.ts, archCheckReport.test.ts   # 업스트림 spec 의 이식본
-│   ├── acceptance.test.ts            #   공식 템플릿 인수 검증 (EGOV_ACCEPTANCE_DIR 미설정 시 skip)
-│   └── fixtures/runtime-graph/       #   실행환경 브랜치별 모듈 의존 추출 원본 (graph-<branch>.txt)
+├── tests/                            # Vitest 테스트 (tests/**/*.test.ts)
+│   ├── checkArchitecture.test.ts     #   도구 리포트, 입력 검증, stdout 청결, 로그 출력 조건
+│   ├── archChecker.test.ts 등        #   엔진 모듈별 테스트 (업스트림 spec 의 이식본)
+│   ├── acceptance.test.ts            #   공식 템플릿 인수 검증 (EGOV_ACCEPTANCE_DIR 이 없으면 건너뜀)
+│   └── fixtures/runtime-graph/       #   실행환경 브랜치별 모듈 의존 추출 원본 (graph-<브랜치>.txt)
 │
-├── build/                            # tsc 산출물 (npm run build 후 생성)
-│   └── index.js                      # MCP 실행 엔트리 (chmod 755)
+├── docs/                             # 상세 문서 (아래 "문서" 참조)
+│   ├── setup/                        #   설치와 MCP 클라이언트 등록
+│   ├── reference/                    #   점검 항목과 판정 규칙, 점검 결과 형식
+│   ├── architecture/                 #   코드 구성과 동작 방식
+│   ├── development/                  #   빌드, 테스트, 패키징, 코드 수정 규칙
+│   └── release-notes/                #   버전별 릴리스 노트
 │
-├── scripts/pack-platforms.sh         # 플랫폼별 번들 tgz 패키징
+├── scripts/pack-platforms.sh         # 플랫폼별 배포 tgz 생성 (npm run pack:platforms)
+├── build/                            # tsc 결과물 (git 미추적). build/index.js 가 실행 진입점
+├── dist/                             # pack:platforms 결과물 tgz (git 미추적)
+├── .nvmrc                            # Node.js 22
 ├── package.json
 ├── tsconfig.json
 ├── vitest.config.ts
 └── LICENSE
 ```
 
-의존 방향은 `javaSource` → `javaIndex` → `daoCheck`, 그리고 `mavenPom`·`gradleBuild`·`runtimeModuleGraph` → `buildFileCheck` 입니다. `archChecker.ts` 가 이들을 순서대로 호출하며, Project 결과의 세대를 DAO / Mapper 의 Version 체크에 넘기고 DAO 판정 대상 타입 이름을 Controller "DAO X" 의 입력으로 씁니다. 도구 진입점(`src/index.ts`, `src/tools/checkArchitecture.ts`) 만 이 저장소 고유 코드이고, `src/utils/*`·`src/shared/*` 는 업스트림과 동기화를 위해 판정 로직을 그대로 유지합니다.
+도구 진입점(`src/index.ts`, `src/tools/checkArchitecture.ts`)과 `src/utils/debugLog.ts` 만 이 저장소 고유의 코드이고, 나머지 `src/utils/*` 와 `src/shared/*` 는 업스트림과 동기화하기 위해 판정 로직을 그대로 유지합니다. 모듈별 책임과 점검이 진행되는 과정은 [`docs/architecture/HOW_IT_WORKS.md`](docs/architecture/HOW_IT_WORKS.md) 에 있습니다.
 
-## ⚙️ 내부 동작 (How it works)
+## 빌드와 테스트
 
-1. **파일 수집** (`collectProjectFiles`, 모든 레이어 공통 규칙)
-   - `@vscode/ripgrep` 의 `rgPath` 가 실제로 존재하면 `rg --files --no-ignore` 를 `shell: false` 인자 배열로 spawn 하고, 없으면 Node `fs` 재귀 탐색으로 대체합니다. **두 경로는 같은 파일 집합**을 돌려줍니다. `@vscode/ripgrep` 은 플랫폼 바이너리 패키지가 없으면 로드 시점에 예외를 던지므로 `src/index.ts` 가 **지연 로드**하여 실패 시 서버를 죽이지 않고 fs 경로로 넘어갑니다. 검색 경로 인자 앞에는 `--` 를 붙여 `-` 로 시작하는 디렉터리 이름이 rg 옵션으로 해석되지 않게 합니다.
-   - 숨김 디렉터리(`.` 으로 시작) 와 빌드 산출물 디렉터리(`node_modules`, `target`, `build`, `out`, `dist`) 는 건너뛰고, `src/test`·`src/it` 아래는 수집하지 않습니다 (테스트 픽스처가 판정과 "DAO X" 이름 집합에 섞이지 않도록).
-   - `--no-ignore` 로 `.gitignore`·`.ignore` 와 무관하게 수집합니다. `.java` 는 한 번만 모아 색인하고 레이어별 파일은 그 목록에서 파일 이름 접미어로 거릅니다.
-2. **실행 순서**
-   Project(빌드 파일) → DAO / Mapper → 데이터 접근 설정 정보 → Controller → Service. Project 가 먼저 도는 이유는 그 세대가 DAO / Mapper Version 체크의 입력이기 때문이고, DAO / Mapper 가 Controller 보다 먼저 도는 이유는 그 판정 대상 타입 이름이 Controller "DAO X" 의 입력이기 때문입니다.
-3. **읽기 캐시**
-   빌드 파일과 `.java` 는 `createCachedReader` 로 경로당 한 번만 읽습니다. 판정 모듈은 파일 읽기를 주입받는 순수 모듈이어서 vitest 로 직접 검증합니다.
-4. **리포트 생성**
-   `src/tools/checkArchitecture.ts` 가 엔진 결과를 위 출력 형식의 텍스트로 만들고, `exportResults: true` 면 `exportArchResults` 로 CSV 도 함께 작성합니다.
+| 명령 | 동작 |
+|------|------|
+| `npm test` | `npm run build` 후 `vitest run` (전체 테스트) |
+| `npm run test:watch` | watch 모드 (빌드하지 않음) |
+| `EGOV_ACCEPTANCE_DIR=/path/to/templates npm test` | 공식 템플릿을 풀어 둔 디렉토리로 인수 테스트까지 실행 |
+| `npm run inspector` | 빌드된 `build/index.js` 를 MCP Inspector 에 연결해 `egov_check_compliance` 를 직접 호출 |
 
-### 로그
-
-stdio 전송에서 **stdout 은 JSON-RPC 채널**이므로 서버는 stdout 에 아무것도 쓰지 않습니다. 파일별 진행 상황 같은 정보성 로그는 환경 변수 `EGOV_CHECK_DEBUG` 가 켜진 경우에만 stderr 로 출력하며, 오류 로그도 파일 이름(basename) 만 남기고 절대 경로는 남기지 않습니다.
+stdio 전송에서 stdout 은 JSON-RPC 채널이므로 서버는 JSON-RPC 메시지 외에는 stdout 에 아무것도 쓰지 않습니다. 파일별 진행 상황 같은 정보성 로그는 환경 변수 `EGOV_CHECK_DEBUG` 를 켠 경우에만 stderr 로 출력합니다.
 
 ```bash
 EGOV_CHECK_DEBUG=1 node build/index.js
 ```
 
-## 🧪 디버깅 / Inspector
+자세한 내용은 [`docs/development/DEVELOPMENT_GUIDE.md`](docs/development/DEVELOPMENT_GUIDE.md) 에 있습니다.
 
-```bash
-npm run inspector
-```
+## 문서
 
-빌드된 `build/index.js` 를 MCP Inspector 에 띄워 `egov_check_compliance` 를 인터랙티브하게 호출할 수 있습니다.
+상세 문서는 [`docs/`](docs/README.md) 에 주제별 폴더로 나뉘어 있습니다.
 
-```bash
-npm test                                   # tsc 빌드 + vitest 전체
-EGOV_ACCEPTANCE_DIR=/path/to/templates npm test   # 공식 템플릿을 풀어 둔 디렉터리로 인수 테스트까지
-```
+| 문서 | 설명 |
+|------|------|
+| [`docs/setup/MCP_SETUP_GUIDE.md`](docs/setup/MCP_SETUP_GUIDE.md) | 설치와 AI 클라이언트별 등록, 환경 변수, 문제 해결 |
+| [`docs/reference/CHECK_RULES.md`](docs/reference/CHECK_RULES.md) | 점검 항목과 판정 규칙 |
+| [`docs/reference/REPORT_FORMAT.md`](docs/reference/REPORT_FORMAT.md) | 점검 결과 형식 (텍스트 리포트, 실패 파일 링크, CSV, 오류 응답) |
+| [`docs/architecture/HOW_IT_WORKS.md`](docs/architecture/HOW_IT_WORKS.md) | 코드 구성과 동작 방식 |
+| [`docs/development/DEVELOPMENT_GUIDE.md`](docs/development/DEVELOPMENT_GUIDE.md) | 빌드, 테스트, 패키징, 코드 수정 규칙 |
+| [`docs/release-notes/v5.1.0-beta.md`](docs/release-notes/v5.1.0-beta.md) | 5.1.0 Beta 릴리스 노트와 배포 파일의 체크섬 |
 
-## ⚠️ 한계 (Limitations)
+## 변경 이력
 
-- 현재 검사 범위는 **Java + eGovFrame 표준 어노테이션/베이스 클래스** 에 한정됩니다. Kotlin/Groovy 소스나 Spring 표준만 따르는(eGov 베이스 미상속) 클래스는 별도 규칙으로 추가가 필요합니다.
-- Mapper XML 의 SQL 내용은 검사하지 않습니다. 설정 파일(XML·yml·properties·Java Config) 과 빌드 파일은 데이터 접근 설정의 **존재 여부**만 정보 항목으로 모으며 판정에는 넣지 않습니다.
-- 빌드 파일은 빌드 도구를 실행하지 않고 텍스트로 읽습니다. Gradle 은 1차 범위의 선언 형태만 인식하고, 번들·루프·헬퍼 함수·conventions 플러그인처럼 해석이 확실하지 않은 형태는 추측하지 않고 `unknown` 으로 남깁니다.
-- 검사는 **정적(static)** 분석입니다. 런타임 Bean 등록 여부나 트랜잭션 propagation 정상성은 판정하지 않습니다.
+| 버전 | 배포일 | 내용 |
+|------|--------|------|
+| v5.1.0 Beta | 2026-11-27 | 최초 배포 버전 ([릴리스 노트](docs/release-notes/v5.1.0-beta.md)) |
 
-## 🔗 함께 쓰는 자매 MCP
+이번 버전은 베타 버전입니다. 문제가 있으면 [GitHub Issues](https://github.com/eGovFramework/egovframe-mcp-check/issues) 에 알려 주세요.
 
-- **[egovframe-mcp-codegen](../egovframe-mcp-codegen)** — DDL 한 줄로 eGovFrame 프로젝트/엔티티 자동 생성 (이 도구의 레이어 검사 결과를 100% 만족)
-- **[egovframe-mcp-search](../egovframe-mcp-search)** — eGovFrame 가이드/표준 용어/공통컴포넌트/호환성 통합 검색
+## 함께 쓰는 MCP 서버
 
-## 📄 라이선스
+이 서버는 점검만 제공합니다. 프로젝트와 코드 생성, 자료 검색은 다음 서버가 제공합니다.
 
-Apache-2.0
+- **[egovframe-mcp-codegen](https://github.com/eGovFramework/egovframe-mcp-codegen)**: DDL 로부터 eGovFrame 프로젝트와 엔티티 코드 생성
+- **[egovframe-mcp-search](https://github.com/eGovFramework/egovframe-mcp-search)**: 공식 가이드, 개발자 지식, 공통컴포넌트, 호환 소프트웨어 통합 검색
+
+## 라이선스
+
+Apache-2.0 라이선스를 따릅니다. 전문은 [`LICENSE`](LICENSE) 에 있습니다.
+
+## Credits
+
+점검 엔진은 [egovframe-vscode-initializr](https://github.com/eGovFramework/egovframe-vscode-initializr) 의 Architecture Check (archChecker) 엔진을 기반으로 합니다.
